@@ -326,6 +326,15 @@ Point ScreenCapturerDxgi::cursorPosition()
 void ScreenCapturerDxgi::reset()
 {
     queue_.reset();
+
+    // The IDXGIOutputDuplication interfaces owned by the controller are bound to the desktop that
+    // was active when they were created. After a desktop switch (for example the lock screen ->
+    // user desktop transition on unlock) they can stop delivering frames without reporting
+    // DXGI_ERROR_ACCESS_LOST (AcquireNextFrame keeps returning DXGI_ERROR_WAIT_TIMEOUT), so the
+    // duplication is never rebuilt and capture freezes. Force the controller to release its
+    // duplication objects so the next captureFrame() rebinds them to the current input desktop.
+    if (controller_)
+        controller_->reset();
 }
 
 } // namespace base

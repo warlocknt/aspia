@@ -330,6 +330,12 @@ void DxgiDuplicatorController::deinitialize()
 }
 
 //--------------------------------------------------------------------------------------------------
+void DxgiDuplicatorController::reset()
+{
+    deinitialize();
+}
+
+//--------------------------------------------------------------------------------------------------
 bool DxgiDuplicatorController::contextExpired(const Context* const context) const
 {
     DCHECK(context);

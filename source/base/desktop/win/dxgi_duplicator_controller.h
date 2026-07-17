@@ -108,6 +108,14 @@ public:
     // this function returns false.
     bool deviceNames(QStringList* output);
 
+    // Releases all COM duplication objects so that the next duplicate() call rebuilds them.
+    // Must be called when the input desktop changes (for example the lock screen -> user
+    // desktop transition on unlock): IDXGIOutputDuplication is bound to the desktop it was
+    // created on and can silently stall (permanent DXGI_ERROR_WAIT_TIMEOUT instead of
+    // DXGI_ERROR_ACCESS_LOST) after a secure-desktop transition, which would otherwise
+    // freeze capture indefinitely.
+    void reset();
+
 private:
     // DxgiFrameContext calls private unregister(Context*) function in reset().
     friend void DxgiFrameContext::reset();
