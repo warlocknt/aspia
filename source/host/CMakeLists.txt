@@ -31,6 +31,8 @@ list(APPEND SOURCE_HOST_CORE
     client_session_system_info.h
     client_session_text_chat.cc
     client_session_text_chat.h
+    video_encode_worker.cc
+    video_encode_worker.h
     desktop_agent_main.cc
     desktop_agent_main.h
     desktop_session.cc

@@ -19,18 +19,18 @@
 #include "host/client_session_desktop.h"
 
 #include <QCoreApplication>
+#include <QThread>
 
 #include "base/logging.h"
 #include "base/power_controller.h"
 #include "base/codec/audio_encoder.h"
-#include "base/codec/cursor_encoder.h"
-#include "base/codec/scale_reducer.h"
-#include "base/codec/video_encoder_vpx.h"
-#include "base/codec/video_encoder_zstd.h"
 #include "base/desktop/frame.h"
+#include "base/desktop/frame_simple.h"
+#include "base/desktop/mouse_cursor.h"
 #include "base/desktop/screen_capturer.h"
 #include "common/desktop_session_constants.h"
 #include "host/desktop_session_manager.h"
+#include "host/video_encode_worker.h"
 #include "host/service_constants.h"
 #include "host/host_storage.h"
 #include "proto/desktop_internal.h"
@@ -45,6 +45,29 @@
 
 namespace host {
 
+namespace {
+
+//--------------------------------------------------------------------------------------------------
+// Makes a private, self-owned copy of |source| so it can be handed to the encode worker thread. The
+// original frame points into the shared-memory capture buffer, which the agent may reuse as soon as
+// the capture is acknowledged, so it must not be read from another thread.
+std::shared_ptr<base::Frame> copyFrame(const base::Frame* source)
+{
+    std::unique_ptr<base::FrameSimple> copy =
+        base::FrameSimple::create(source->size(), source->format());
+    if (!copy)
+    {
+        LOG(ERROR) << "Failed to allocate frame copy";
+        return nullptr;
+    }
+
+    copy->copyPixelsFrom(source->frameData(), source->stride(), base::Rect::makeSize(source->size()));
+    copy->copyFrameInfoFrom(*source);
+    return std::shared_ptr<base::Frame>(std::move(copy));
+}
+
+} // namespace
+
 //--------------------------------------------------------------------------------------------------
 ClientSessionDesktop::ClientSessionDesktop(proto::peer::SessionType session_type,
                                            base::TcpChannel* channel,
@@ -57,12 +80,33 @@ ClientSessionDesktop::ClientSessionDesktop(proto::peer::SessionType session_type
 
     connect(overflow_detection_timer_, &QTimer::timeout,
             this, &ClientSessionDesktop::onOverflowDetectionTimer);
+
+    // Video/cursor encoding runs on a dedicated thread so it no longer competes with network I/O,
+    // IPC and input injection on the main thread.
+    encode_thread_ = new QThread(this);
+    encode_worker_ = new VideoEncodeWorker();
+    encode_worker_->moveToThread(encode_thread_);
+
+    connect(encode_worker_, &VideoEncodeWorker::sig_encoded,
+            this, &ClientSessionDesktop::onEncoded);
+
+    encode_thread_->start();
 }
 
 //--------------------------------------------------------------------------------------------------
 ClientSessionDesktop::~ClientSessionDesktop()
 {
     LOG(INFO) << "Dtor";
+
+    if (encode_thread_)
+    {
+        encode_thread_->quit();
+        encode_thread_->wait();
+    }
+
+    // Safe to delete directly: the worker's thread is fully stopped after wait().
+    delete encode_worker_;
+    encode_worker_ = nullptr;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -157,18 +201,18 @@ void ClientSessionDesktop::onReceived(const QByteArray& buffer)
             return;
         }
 
-        if (!scale_reducer_)
+        if (!has_video_encoder_)
         {
-            LOG(ERROR) << "Scale reducer NOT initialized";
+            LOG(ERROR) << "Video encoder NOT initialized";
             return;
         }
 
         const proto::desktop::MouseEvent& mouse_event = incoming_message_->mouse_event();
 
         int pos_x = static_cast<int>(
-            static_cast<double>(mouse_event.x() * 100) / scale_reducer_->scaleFactorX());
+            static_cast<double>(mouse_event.x() * 100) / scale_x_);
         int pos_y = static_cast<int>(
-            static_cast<double>(mouse_event.y() * 100) / scale_reducer_->scaleFactorY());
+            static_cast<double>(mouse_event.y() * 100) / scale_y_);
 
         proto::desktop::MouseEvent out_mouse_event;
         out_mouse_event.set_mask(mouse_event.mask());
@@ -259,12 +303,19 @@ void ClientSessionDesktop::encodeScreen(const base::Frame* frame, const base::Mo
     if (critical_overflow_)
         return;
 
-    proto::desktop::HostToClient& message = outgoing_message_.newMessage();
+    // The worker is still busy with the previous frame. Drop this one instead of queueing it: the
+    // capture is no longer throttled by the encoder, so queueing would grow without bound (each
+    // queued item holds a full frame copy) and add minutes of latency. The next capture will carry
+    // fresher content.
+    if (encode_in_flight_)
+        return;
 
-    if (!is_video_paused_ && frame && video_encoder_)
+    std::shared_ptr<base::Frame> frame_copy;
+    int target_width = 0;
+    int target_height = 0;
+
+    if (!is_video_paused_ && frame && has_video_encoder_)
     {
-        DCHECK(scale_reducer_);
-
         if (source_size_ != frame->size())
         {
             // Every time we change the resolution, we have to reset the preferred size.
@@ -295,58 +346,66 @@ void ClientSessionDesktop::encodeScreen(const base::Frame* frame, const base::Mo
                 current_size = forced_size_;
         }
 
-        const base::Frame* scaled_frame = scale_reducer_->scaleFrame(frame, current_size);
-        if (!scaled_frame)
+        // Update the scale factors used for input/cursor coordinate translation. These mirror what
+        // the worker's ScaleReducer computes from the same source and target sizes.
+        if (!source_size_.isEmpty())
         {
-            LOG(ERROR) << "No scaled frame";
-            return;
+            scale_x_ = 100.0 * static_cast<double>(current_size.width()) /
+                static_cast<double>(source_size_.width());
+            scale_y_ = 100.0 * static_cast<double>(current_size.height()) /
+                static_cast<double>(source_size_.height());
         }
 
-        proto::desktop::VideoPacket* packet = message.mutable_video_packet();
-
-        // Encode the frame into a video packet.
-        if (!video_encoder_->encode(scaled_frame, packet))
-        {
-            LOG(ERROR) << "Unable to encode video packet";
-            return;
-        }
-
-        if (packet->has_format())
-        {
-            proto::desktop::VideoPacketFormat* format = packet->mutable_format();
-
-            // In video packets that contain the format, we pass the screen capture type.
-            format->set_capturer_type(frame->capturerType());
-
-            // Real screen size.
-            proto::desktop::Size* screen_size = format->mutable_screen_size();
-            screen_size->set_width(frame->size().width());
-            screen_size->set_height(frame->size().height());
-
-            LOG(INFO) << "Video packet has format";
-            LOG(INFO) << "Capturer type:" << static_cast<base::ScreenCapturer::Type>(frame->capturerType());
-            LOG(INFO) << "Screen size:" << screen_size;
-            LOG(INFO) << "Video size:" << format->video_rect();
-        }
+        // Copy the frame out of the shared-memory capture buffer so the worker thread can read it
+        // safely after this capture is acknowledged.
+        frame_copy = copyFrame(frame);
+        target_width = current_size.width();
+        target_height = current_size.height();
     }
 
-    if (cursor && cursor_encoder_)
+    std::shared_ptr<base::MouseCursor> cursor_copy;
+    if (cursor)
+        cursor_copy = std::make_shared<base::MouseCursor>(*cursor);
+
+    if (!frame_copy && !cursor_copy)
+        return;
+
+    // Hand off the CPU-heavy scaling/encoding to the worker thread. It always emits sig_encoded()
+    // when done, which is delivered back to onEncoded() on this thread and clears the guard.
+    encode_in_flight_ = true;
+
+    VideoEncodeWorker* worker = encode_worker_;
+    QMetaObject::invokeMethod(worker,
+        [worker, frame_copy, cursor_copy, target_width, target_height]()
     {
-        if (!cursor_encoder_->encode(*cursor, message.mutable_cursor_shape()))
-            message.clear_cursor_shape();
-    }
+        worker->encode(frame_copy, cursor_copy, target_width, target_height);
+    }, Qt::QueuedConnection);
+}
 
-    if (message.has_video_packet() || message.has_cursor_shape())
-    {
-        sendMessage(outgoing_message_.serialize());
+//--------------------------------------------------------------------------------------------------
+void ClientSessionDesktop::onEncoded(const QByteArray& serialized, bool has_video_packet)
+{
+    // The worker is free again, so the next captured frame can be handed to it.
+    encode_in_flight_ = false;
 
-        if (message.has_video_packet())
-        {
-            video_encoder_->setEncodeBuffer(
-                std::move(*message.mutable_video_packet()->mutable_data()));
-            stat_counter_.addVideoPacket();
-        }
-    }
+    // The worker signals completion even when there was nothing to send.
+    if (serialized.isEmpty())
+        return;
+
+    sendMessage(serialized);
+
+    if (has_video_packet)
+        stat_counter_.addVideoPacket();
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClientSessionDesktop::requestKeyFrame()
+{
+    VideoEncodeWorker* worker = encode_worker_;
+    if (!worker)
+        return;
+
+    QMetaObject::invokeMethod(worker, [worker]() { worker->requestKeyFrame(); }, Qt::QueuedConnection);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -382,9 +441,9 @@ void ClientSessionDesktop::setCursorPosition(const proto::desktop::CursorPositio
         return;
 
     int pos_x = static_cast<int>(
-        static_cast<double>(cursor_position.x()) * scale_reducer_->scaleFactorX() / 100.0);
+        static_cast<double>(cursor_position.x()) * scale_x_ / 100.0);
     int pos_y = static_cast<int>(
-        static_cast<double>(cursor_position.y()) * scale_reducer_->scaleFactorY() / 100.0);
+        static_cast<double>(cursor_position.y()) * scale_y_ / 100.0);
 
     proto::desktop::CursorPosition* position = outgoing_message_.newMessage().mutable_cursor_position();
     position->set_x(pos_x);
@@ -484,30 +543,32 @@ void ClientSessionDesktop::readConfig(const proto::desktop::Config& config)
     switch (config.video_encoding())
     {
         case proto::desktop::VIDEO_ENCODING_VP8:
-            video_encoder_ = base::VideoEncoderVPX::createVP8();
-            break;
-
         case proto::desktop::VIDEO_ENCODING_VP9:
-            video_encoder_ = base::VideoEncoderVPX::createVP9();
-            break;
-
         case proto::desktop::VIDEO_ENCODING_ZSTD:
-            video_encoder_ = base::VideoEncoderZstd::create(
-                base::PixelFormat::fromProto(config.pixel_format()), static_cast<int>(config.compress_ratio()));
+            has_video_encoder_ = true;
             break;
 
         default:
-        {
             // No supported video encoding.
             LOG(ERROR) << "Unsupported video encoding:" << config.video_encoding();
-        }
-        break;
+            has_video_encoder_ = false;
+            break;
     }
 
-    if (!video_encoder_)
+    if (!has_video_encoder_)
     {
         LOG(ERROR) << "Video encoder not initialized!";
         return;
+    }
+
+    // The video/cursor encoders and the scaler live on the worker thread; (re)create them there.
+    {
+        VideoEncodeWorker* worker = encode_worker_;
+        proto::desktop::Config config_copy = config;
+        QMetaObject::invokeMethod(worker, [worker, config_copy]()
+        {
+            worker->configure(config_copy);
+        }, Qt::QueuedConnection);
     }
 
     switch (config.audio_encoding())
@@ -523,15 +584,6 @@ void ClientSessionDesktop::readConfig(const proto::desktop::Config& config)
         }
         break;
     }
-
-    cursor_encoder_.reset();
-    if (config.flags() & proto::desktop::ENABLE_CURSOR_SHAPE)
-    {
-        LOG(INFO) << "Cursor shape enabled. Init cursor encoder";
-        cursor_encoder_ = std::make_unique<base::CursorEncoder>();
-    }
-
-    scale_reducer_ = std::make_unique<base::ScaleReducer>();
 
     desktop_session_config_.disable_font_smoothing =
         (config.flags() & proto::desktop::DISABLE_FONT_SMOOTHING);
@@ -550,7 +602,8 @@ void ClientSessionDesktop::readConfig(const proto::desktop::Config& config)
 
     LOG(INFO) << "Client configuration changed";
     LOG(INFO) << "Video encoding:" << config.video_encoding();
-    LOG(INFO) << "Enable cursor shape:" << (cursor_encoder_ != nullptr);
+    LOG(INFO) << "Enable cursor shape:"
+              << ((config.flags() & proto::desktop::ENABLE_CURSOR_SHAPE) != 0);
     LOG(INFO) << "Disable font smoothing:" << desktop_session_config_.disable_font_smoothing;
     LOG(INFO) << "Disable desktop effects:" << desktop_session_config_.disable_effects;
     LOG(INFO) << "Disable desktop wallpaper:" << desktop_session_config_.disable_wallpaper;
@@ -621,13 +674,13 @@ void ClientSessionDesktop::readVideoPauseExtension(const std::string& data)
 
     if (!is_video_paused_)
     {
-        if (!video_encoder_)
+        if (!has_video_encoder_)
         {
             LOG(ERROR) << "Video encoder not initialized";
             return;
         }
 
-        video_encoder_->setKeyFrameRequired(true);
+        requestKeyFrame();
     }
 }
 
@@ -872,8 +925,8 @@ void ClientSessionDesktop::onOverflowDetectionTimer()
     {
         if (critical_overflow_)
         {
-            if (video_encoder_)
-                video_encoder_->setKeyFrameRequired(true);
+            if (has_video_encoder_)
+                requestKeyFrame();
         }
 
         critical_overflow_ = false;

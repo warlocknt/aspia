@@ -32,16 +32,17 @@
 #include "host/task_manager.h"
 #endif // defined(Q_OS_WINDOWS)
 
+class QThread;
+
 namespace base {
 class AudioEncoder;
-class CursorEncoder;
 class Frame;
 class MouseCursor;
-class ScaleReducer;
-class VideoEncoder;
 } // namespace base
 
 namespace host {
+
+class VideoEncodeWorker;
 
 class ClientSessionDesktop final : public ClientSession
 {
@@ -84,6 +85,8 @@ private slots:
 #endif // defined(Q_OS_WINDOWS)
 
 private:
+    void onEncoded(const QByteArray& serialized, bool has_video_packet);
+    void requestKeyFrame();
     void readExtension(const proto::desktop::Extension& extension);
     void readConfig(const proto::desktop::Config& config);
     void readSelectScreenExtension(const std::string& data);
@@ -99,14 +102,29 @@ private:
     void downStepOverflow();
     void upStepOverflow();
 
-    std::unique_ptr<base::ScaleReducer> scale_reducer_;
-    std::unique_ptr<base::VideoEncoder> video_encoder_;
-    std::unique_ptr<base::CursorEncoder> cursor_encoder_;
     std::unique_ptr<base::AudioEncoder> audio_encoder_;
+
+    // Video/cursor encoding runs on |encode_worker_|, which lives on |encode_thread_|, so that the
+    // CPU-heavy encode no longer serializes with network I/O, IPC and input on the main thread.
+    QThread* encode_thread_ = nullptr;
+    VideoEncodeWorker* encode_worker_ = nullptr;
+    bool has_video_encoder_ = false;
+
+    // True while the worker is encoding a frame. Capture is no longer gated by encoding, so without
+    // this guard frames would pile up in the worker's queue (each holding a full frame copy) faster
+    // than they can be encoded. Real-time semantics: drop frames instead of queueing them, the next
+    // capture carries fresher content anyway.
+    bool encode_in_flight_ = false;
     DesktopSession::Config desktop_session_config_;
     base::Size source_size_;
     base::Size preferred_size_;
     base::Size forced_size_;
+
+    // Source->target scale factors (percent), kept on the main thread for translating input/cursor
+    // coordinates. Mirror what the worker's ScaleReducer computes (target * 100 / source).
+    double scale_x_ = 100.0;
+    double scale_y_ = 100.0;
+
     bool is_video_paused_ = false;
     bool is_audio_paused_ = false;
 
