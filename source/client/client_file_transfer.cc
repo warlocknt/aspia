@@ -61,13 +61,23 @@ void ClientFileTransfer::onSessionMessageReceived(const QByteArray& buffer)
 
     if (!base::parse(buffer, &reply))
     {
+        // Replies are matched to requests by their order in the queue, so an unreadable reply
+        // leaves the queue with a request that will never be answered. Nothing else drains the
+        // queue, and doNextRemoteTask() only runs when a reply arrives, so every later operation
+        // would be silently queued forever. Report the failure instead of stalling.
         LOG(ERROR) << "Invalid message from host";
+
+        if (!remote_task_queue_.isEmpty())
+            remote_task_queue_.pop_front();
+
+        emit sig_errorOccurred(proto::file_transfer::ERROR_CODE_UNKNOWN);
         return;
     }
 
-    if (reply.error_code() == proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER)
+    if (reply.error_code() == proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER ||
+        reply.error_code() == proto::file_transfer::ERROR_CODE_USER_SESSION_LOCKED)
     {
-        LOG(INFO) << "No logged in user on host side";
+        LOG(INFO) << "File transfer is not available on host side:" << reply.error_code();
         emit sig_errorOccurred(reply.error_code());
     }
     else if (!remote_task_queue_.isEmpty())

@@ -220,7 +220,8 @@ void ClientSessionFileTransfer::onStarted()
     base::ScopedHandle session_token;
     if (!createLoggedOnUserToken(sessionId(), &session_token))
     {
-        LOG(ERROR) << "createSessionToken failed";
+        LOG(ERROR) << "createSessionToken failed (no user is logged on)";
+        no_user_error_ = proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER;
         return;
     }
 
@@ -234,7 +235,10 @@ void ClientSessionFileTransfer::onStarted()
 
     if (session_info.isUserLocked())
     {
+        // Deliberately refused: file transfer to a locked workstation is not allowed. Report it as
+        // a distinct condition, a user is logged on here and unlocking is enough.
         LOG(ERROR) << "User session is locked";
+        no_user_error_ = proto::file_transfer::ERROR_CODE_USER_SESSION_LOCKED;
         return;
     }
 
@@ -318,7 +322,7 @@ void ClientSessionFileTransfer::onReceived(const QByteArray& buffer)
     if (!has_logged_on_user_)
     {
         proto::file_transfer::Reply reply;
-        reply.set_error_code(proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER);
+        reply.set_error_code(no_user_error_);
 
         sendMessage(base::serialize(reply));
         return;

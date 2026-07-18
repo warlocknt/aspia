@@ -139,6 +139,11 @@ enum ErrorCode
     ERROR_CODE_FILE_WRITE_ERROR    = 12;
     ERROR_CODE_FILE_READ_ERROR     = 13;
     ERROR_CODE_DISK_NOT_READY      = 14;
+
+    // A user is logged on, but the session is locked. Reported separately from
+    // ERROR_CODE_NO_LOGGED_ON_USER so that the operator can tell whether the computer has to be
+    // unlocked or somebody has to log on first.
+    ERROR_CODE_USER_SESSION_LOCKED = 15;
 }
 
 message Reply

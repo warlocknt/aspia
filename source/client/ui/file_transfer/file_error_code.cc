@@ -85,6 +85,10 @@ QString fileErrorToString(proto::file_transfer::ErrorCode error_code)
             message = QT_TRANSLATE_NOOP("FileError", "No logged in user");
             break;
 
+        case proto::file_transfer::ERROR_CODE_USER_SESSION_LOCKED:
+            message = QT_TRANSLATE_NOOP("FileError", "The computer is locked. Unlock it to transfer files");
+            break;
+
         default:
             message = QT_TRANSLATE_NOOP("FileError", "Unknown error code");
             break;

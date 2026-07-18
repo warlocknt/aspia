@@ -26,6 +26,7 @@
 #include "base/ipc/ipc_channel.h"
 #include "base/ipc/ipc_server.h"
 #include "host/client_session.h"
+#include "proto/file_transfer.h"
 
 namespace host {
 
@@ -56,6 +57,11 @@ private:
     base::IpcChannel* ipc_channel_ = nullptr;
     QList<QByteArray> pending_messages_;
     bool has_logged_on_user_ = false;
+
+    // Why the agent could not be started. Sent back for every request while |has_logged_on_user_|
+    // is false, so that the operator can tell an empty session from a locked one.
+    proto::file_transfer::ErrorCode no_user_error_ =
+        proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER;
 
     Q_DISABLE_COPY(ClientSessionFileTransfer)
 };
