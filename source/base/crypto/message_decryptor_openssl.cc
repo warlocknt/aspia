@@ -98,6 +98,15 @@ size_t MessageDecryptorOpenssl::decryptedDataSize(size_t in_size)
 //--------------------------------------------------------------------------------------------------
 bool MessageDecryptorOpenssl::decrypt(const void* in, size_t in_size, void* out)
 {
+    // A valid ciphertext is at least tag-sized (empty plaintext plus tag). Reject anything shorter
+    // before it reaches EVP: |in_size - kTagSize| would otherwise be a negative length and read
+    // past |in|.
+    if (in_size < static_cast<size_t>(kTagSize))
+    {
+        LOG(ERROR) << "Ciphertext shorter than authentication tag:" << in_size;
+        return false;
+    }
+
     if (EVP_DecryptInit_ex(ctx_.get(), nullptr, nullptr, nullptr,
         reinterpret_cast<const quint8*>(iv_.data())) != 1)
     {

@@ -430,7 +430,19 @@ void TcpChannel::onMessageReceived()
         return;
     }
 
-    resizeBuffer(&decrypt_buffer_, decryptor_->decryptedDataSize(read_size));
+    // decryptedDataSize() subtracts the authentication tag from the message size. The sizes are
+    // unsigned, so a message shorter than the tag wraps the subtraction around into a huge value,
+    // and the buffer below would be resized to it. Catch that here: decrypted data can never be
+    // larger than the message it was taken from.
+    const size_t decrypted_size = decryptor_->decryptedDataSize(read_size);
+    if (decrypted_size > read_size)
+    {
+        LOG(ERROR) << "Message is shorter than the authentication tag:" << read_size;
+        onErrorOccurred(FROM_HERE, ErrorCode::INVALID_PROTOCOL);
+        return;
+    }
+
+    resizeBuffer(&decrypt_buffer_, decrypted_size);
 
     if (!decryptor_->decrypt(read_data, read_size, decrypt_buffer_.data()))
     {
