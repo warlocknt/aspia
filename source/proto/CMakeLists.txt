@@ -54,5 +54,6 @@ protobuf_generate(LANGUAGE qt
                   PLUGIN "protoc-gen-qt=${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/${QTPROTOC_FILENAME}"
                   GENERATE_EXTENSIONS .h .cc
                   ${SOURCE_PROTO})
-
+				  
+target_include_directories(aspia_proto PUBLIC ${CMAKE_BINARY_DIR}/source)
 target_link_libraries(aspia_proto ${THIRD_PARTY_LIBS} ${QT_COMMON_LIBS} ${QT_PLATFORM_LIBS})

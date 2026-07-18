@@ -16,7 +16,11 @@
 # along with this program. If not, see <https://www.gnu.org/licenses/>.
 #
 
-file(GLOB WDK_NTDDK_FILES "C:/Program Files*/Windows Kits/*/Include/*/um/avrt.h")
+if (DEFINED WDK_TARGET_VERSION)
+    file(GLOB WDK_NTDDK_FILES "C:/Program Files*/Windows Kits/*/Include/${WDK_TARGET_VERSION}/um/avrt.h")
+else()
+    file(GLOB WDK_NTDDK_FILES "C:/Program Files*/Windows Kits/*/Include/*/um/avrt.h")
+endif()
 
 if(WDK_NTDDK_FILES)
     list(SORT WDK_NTDDK_FILES COMPARE NATURAL)
