@@ -6,6 +6,8 @@ Aspia
 >
 > В период стабилизации используйте все компоненты из одной сборки: правки пока вносятся без оглядки на совместимость версий. Там, где совместимость окажется возможной, она будет сохранена.
 >
+> Пока идёт стабилизация, собираются и проверяются только сборки для Windows. Поддержка Linux и macOS в исходном коде сохранена, но здесь не собирается и не тестируется.
+>
 > Это форк [dchapyshev/aspia](https://github.com/dchapyshev/aspia). Ветка `stabilize/3.0.0-qt5` основана на коммите `fcec8cf5` оригинального репозитория — это последнее состояние версии 3.0.0 на Qt5, непосредственно перед началом переноса проекта на Qt6 (следующий коммит upstream — `c24346c3` «Porting to qt6»).
 >
 > Версия 3.0.0 автором официально не выпускалась: последний релиз upstream — [v2.7.0](https://github.com/dchapyshev/aspia/releases) (май 2024). Здесь она дорабатывается: исправляются ошибки, выявленные при реальной эксплуатации.
@@ -16,6 +18,8 @@ Aspia
 > **This version is unstable. Stabilization is in progress. Not recommended for production use — testing only.**
 >
 > While stabilization is under way, use all components from the same build: changes are currently made without regard for version compatibility. Where compatibility turns out to be feasible, it will be preserved.
+>
+> For now only Windows builds are produced and tested. Linux and macOS support is kept in the source, but is neither built nor tested here.
 >
 > This is a fork of [dchapyshev/aspia](https://github.com/dchapyshev/aspia). The `stabilize/3.0.0-qt5` branch is based on commit `fcec8cf5` of the original repository — the last state of version 3.0.0 on Qt5, immediately before the project's migration to Qt6 began (the next upstream commit is `c24346c3` "Porting to qt6").
 >
