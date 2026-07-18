@@ -204,14 +204,29 @@ if (NOT GIT_COMMIT_COUNT GREATER 0)
     set(GIT_COMMIT_COUNT 0)
 endif()
 
+# Check whether the working tree has uncommitted changes to tracked files. If it does, the commit
+# hash above does not fully describe what was built, and the log must say so.
+execute_process(COMMAND git status --porcelain --untracked-files=no
+                WORKING_DIRECTORY ${CMAKE_SOURCE_DIR}
+                OUTPUT_VARIABLE GIT_MODIFIED_FILES
+                OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if (GIT_MODIFIED_FILES)
+    set(GIT_TREE_DIRTY 1)
+else()
+    set(GIT_TREE_DIRTY 0)
+endif()
+
 # Add git branch and commit hash to definitions.
 add_definitions(-DGIT_CURRENT_BRANCH=\"${GIT_CURRENT_BRANCH}\"
                 -DGIT_COMMIT_HASH=\"${GIT_COMMIT_HASH}\"
-                -DGIT_COMMIT_COUNT=${GIT_COMMIT_COUNT})
+                -DGIT_COMMIT_COUNT=${GIT_COMMIT_COUNT}
+                -DGIT_TREE_DIRTY=${GIT_TREE_DIRTY})
 
 message(STATUS "Git branch: ${GIT_CURRENT_BRANCH}")
 message(STATUS "Git commit: ${GIT_COMMIT_HASH}")
 message(STATUS "Git commit count: ${GIT_COMMIT_COUNT}")
+message(STATUS "Git tree dirty: ${GIT_TREE_DIRTY}")
 
 add_subdirectory(base)
 add_subdirectory(client)

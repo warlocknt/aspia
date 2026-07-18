@@ -21,11 +21,15 @@
 #include "base/debug.h"
 
 #if defined(Q_OS_WINDOWS)
+#include "base/win/file_version_info.h"
 #include "base/win/mini_dump_writer.h"
+#include "build/version.h"
 
 #include <qt_windows.h>
 #include <comdef.h>
 #include <Psapi.h>
+
+#include <vector>
 #endif // defined(Q_OS_WINDOWS)
 
 #if defined(Q_OS_LINUX)
@@ -41,6 +45,7 @@
 #include <QDateTime>
 #include <QFile>
 #include <QDir>
+#include <QFileInfo>
 #include <QMutex>
 #include <QThread>
 
@@ -97,6 +102,116 @@ QString defaultLogFileDir()
 {
     return QDir::tempPath() + "/aspia";
 }
+
+#if defined(Q_OS_WINDOWS)
+//--------------------------------------------------------------------------------------------------
+// Returns the module this code belongs to. For the host that is aspia_host_core.dll, for the client
+// and the console the executable itself.
+HMODULE currentModule()
+{
+    HMODULE module = nullptr;
+    GetModuleHandleExW(GET_MODULE_HANDLE_EX_FLAG_FROM_ADDRESS |
+                       GET_MODULE_HANDLE_EX_FLAG_UNCHANGED_REFCOUNT,
+                       reinterpret_cast<LPCWSTR>(&defaultLogFileDir), &module);
+    return module;
+}
+
+//--------------------------------------------------------------------------------------------------
+// Returns the link time recorded in the PE header of |module|. Unlike the git commit, it changes on
+// every build, which is what identifies a particular binary when several builds share one commit.
+QString moduleBuildTimestamp(HMODULE module)
+{
+    if (!module)
+        return QString();
+
+    const quint8* image_base = reinterpret_cast<const quint8*>(module);
+
+    const IMAGE_DOS_HEADER* dos_header = reinterpret_cast<const IMAGE_DOS_HEADER*>(image_base);
+    if (dos_header->e_magic != IMAGE_DOS_SIGNATURE)
+        return QString();
+
+    const IMAGE_NT_HEADERS* nt_headers =
+        reinterpret_cast<const IMAGE_NT_HEADERS*>(image_base + dos_header->e_lfanew);
+    if (nt_headers->Signature != IMAGE_NT_SIGNATURE)
+        return QString();
+
+    const quint32 timestamp = nt_headers->FileHeader.TimeDateStamp;
+
+    // With reproducible builds the linker stores a hash here instead of a time. Sanity check the
+    // value so that a nonsensical date is never reported.
+    static const quint32 kMinValidTime = 1577836800; // 2020-01-01.
+    static const quint32 kMaxValidTime = 4102444800; // 2100-01-01.
+
+    if (timestamp < kMinValidTime || timestamp > kMaxValidTime)
+        return QString();
+
+    return QDateTime::fromSecsSinceEpoch(timestamp, Qt::UTC).toString("yyyy-MM-dd hh:mm:ss 'UTC'");
+}
+
+//--------------------------------------------------------------------------------------------------
+// Logs the version and link time of every Aspia module loaded into this process. An executable from
+// one build combined with a core library from another is a typical result of a partial or failed
+// update, and is otherwise almost impossible to notice.
+void logAspiaModules()
+{
+    HANDLE process = GetCurrentProcess();
+
+    DWORD bytes_needed = 0;
+    if (!EnumProcessModules(process, nullptr, 0, &bytes_needed) || !bytes_needed)
+    {
+        PLOG(ERROR) << "EnumProcessModules failed";
+        return;
+    }
+
+    std::vector<HMODULE> modules(bytes_needed / sizeof(HMODULE));
+
+    if (!EnumProcessModules(process, modules.data(),
+                            static_cast<DWORD>(modules.size() * sizeof(HMODULE)), &bytes_needed))
+    {
+        PLOG(ERROR) << "EnumProcessModules failed";
+        return;
+    }
+
+    modules.resize(bytes_needed / sizeof(HMODULE));
+
+    const QString expected_version = QStringLiteral(ASPIA_VERSION_STRING);
+    bool version_mismatch = false;
+
+    for (HMODULE module : modules)
+    {
+        wchar_t module_path[MAX_PATH] = { 0 };
+        if (!GetModuleFileNameExW(process, module, module_path, MAX_PATH))
+            continue;
+
+        const QString file_name = QFileInfo(QString::fromWCharArray(module_path)).fileName();
+
+        // Only our own modules are of interest, the rest belong to the system.
+        if (!file_name.startsWith(QLatin1String("aspia"), Qt::CaseInsensitive))
+            continue;
+
+        QString version;
+        std::unique_ptr<FileVersionInfo> version_info =
+            FileVersionInfo::createFileVersionInfoForModule(module);
+        if (version_info)
+            version = version_info->fileVersion();
+
+        LOG(INFO) << "Module:" << file_name << "(version:" << version
+                  << "built:" << moduleBuildTimestamp(module) << ")";
+
+        if (!version.isEmpty() && version != expected_version)
+            version_mismatch = true;
+    }
+
+    if (version_mismatch)
+    {
+        // Deliberately not fatal: differing versions are often still compatible, and refusing to
+        // work would be worse than the mismatch itself. Just make it visible in the log.
+        LOG(WARNING) << "Loaded modules have different versions (this one is built as"
+                     << expected_version << "). This is usually caused by a partial or failed "
+                        "update. Check that all files come from the same build.";
+    }
+}
+#endif // defined(Q_OS_WINDOWS)
 
 //--------------------------------------------------------------------------------------------------
 bool initLoggingUnlocked(const QString& prefix)
@@ -307,13 +422,22 @@ bool initLogging(const LoggingSettings& settings)
 
     qInstallMessageHandler(qtMessageHandler);
 
+    // The block below identifies the build and its environment. It is the first thing needed when
+    // investigating any report, and it is written exactly once per run, so it is always logged: with
+    // the configured level it would be dropped on installations that only keep warnings or errors,
+    // which are precisely the ones from which logs are usually requested.
+    const LoggingSeverity configured_log_level = g_min_log_level;
+    g_min_log_level = LOG_INFO;
+
     LOG(INFO) << "Executable file:" << applicationFilePath();
     if (g_logging_destination & LOG_TO_FILE)
     {
         // If log output is enabled, then we output information about the file.
         LOG(INFO) << "Logging file:" << g_log_file_path;
     }
-    LOG(INFO) << "Logging level:" << g_min_log_level;
+
+    // Report the level that was actually requested, not the one forced for this block.
+    LOG(INFO) << "Logging level:" << configured_log_level;
 
 #if defined(NDEBUG)
     LOG(INFO) << "Debug build: No";
@@ -321,7 +445,26 @@ bool initLogging(const LoggingSettings& settings)
     LOG(INFO) << "Debug build: Yes";
 #endif // defined(NDEBUG)
 
+#if defined(Q_OS_WINDOWS)
+    // The git commit alone does not identify a binary: several builds can share one commit. The link
+    // time does, and it is recorded by the linker itself, so it cannot go stale.
+    const QString build_timestamp = moduleBuildTimestamp(currentModule());
+    if (!build_timestamp.isEmpty())
+        LOG(INFO) << "Build time:" << build_timestamp;
+#endif // defined(Q_OS_WINDOWS)
+
+#if defined(GIT_TREE_DIRTY) && GIT_TREE_DIRTY
+    LOG(INFO) << "Built from modified sources: Yes (working tree had uncommitted changes)";
+#endif // defined(GIT_TREE_DIRTY) && GIT_TREE_DIRTY
+
+#if defined(Q_OS_WINDOWS)
+    logAspiaModules();
+#endif // defined(Q_OS_WINDOWS)
+
     LOG(INFO) << "Logging started";
+
+    // Startup block is over, from here on the configured level applies again.
+    g_min_log_level = configured_log_level;
     return true;
 }
 
