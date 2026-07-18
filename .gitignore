@@ -17,3 +17,10 @@
 # SW build dir and generated files
 .sw
 /*.lnk
+
+# Local build scripts (machine-specific paths)
+/build_all.cmd
+/build_all_msi.cmd
+/version.cmd
+/installer/build_ru_en.cmd
+/.qtcreator/
