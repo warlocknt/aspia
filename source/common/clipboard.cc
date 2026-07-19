@@ -26,6 +26,17 @@ namespace {
 
 const char kMimeTypeTextUtf8[] = "text/plain; charset=UTF-8";
 
+// A message that does not fit into base::NetworkChannel::kMaxMessageSize (7 MB) is not merely
+// refused: the channel reports INVALID_PROTOCOL and the connection is dropped. Copying a large
+// enough block of text would therefore end the session, which is a poor trade for a clipboard that
+// failed to synchronize.
+//
+// The limit is deliberately well below 7 MB rather than exactly computed. On top of the payload
+// come the protobuf framing, the encryption tag and nonce, and the outer message the event is
+// nested in; leaving room for all of that costs nothing, while measuring it precisely would tie
+// this constant to details that are free to change.
+const size_t kMaxClipboardDataSize = 4 * 1024 * 1024; // 4 MB
+
 } // namespace
 
 //--------------------------------------------------------------------------------------------------
@@ -44,6 +55,16 @@ void Clipboard::start()
 //--------------------------------------------------------------------------------------------------
 void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event)
 {
+    // The channel already refuses anything above its own limit, so this is a sanity check rather
+    // than a defence: it keeps a peer built from different sources from filling the local clipboard
+    // with something this side would never agree to send.
+    if (event.data().size() > kMaxClipboardDataSize)
+    {
+        LOG(WARNING) << "Received clipboard data is too large:" << event.data().size()
+                     << "bytes (limit" << kMaxClipboardDataSize << "). Ignored.";
+        return;
+    }
+
     if (event.mime_type() == kMimeTypeTextUtf8)
     {
         // Store last injected data.
@@ -70,9 +91,21 @@ void Clipboard::onData(const QString& data)
     if (last_data_ == data)
         return;
 
+    std::string utf8_data = data.toStdString();
+
+    // Dropping the event costs the user a clipboard that did not travel. Sending it would cost
+    // them the whole session, because the channel treats an oversized message as a protocol
+    // violation and disconnects.
+    if (utf8_data.size() > kMaxClipboardDataSize)
+    {
+        LOG(WARNING) << "Clipboard data is too large to send:" << utf8_data.size()
+                     << "bytes (limit" << kMaxClipboardDataSize << "). Not synchronized.";
+        return;
+    }
+
     proto::desktop::ClipboardEvent event;
     event.set_mime_type(kMimeTypeTextUtf8);
-    event.set_data(data.toStdString());
+    event.set_data(std::move(utf8_data));
 
     emit sig_clipboardEvent(event);
 }

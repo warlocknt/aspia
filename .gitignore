@@ -22,5 +22,6 @@
 /build_all.cmd
 /build_all_msi.cmd
 /version.cmd
+/release.cmd
 /installer/build_ru_en.cmd
 /.qtcreator/
