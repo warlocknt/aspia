@@ -50,7 +50,16 @@ const char kGplTranslationLink[] = "https://www.gnu.org/licenses/translations.ht
 const char kHomeLink[] = "https://aspia.org";
 const char kGitHubLink[] = "https://github.com/dchapyshev/aspia";
 
+// This build is a fork. The link above points to the original project and must stay; this one
+// points to where the modifications actually live.
+const char kForkLink[] = "https://github.com/warlocknt/aspia";
+
+// The original author. Kept intact - removing this would violate the GPL, and the fork is built on
+// their work.
 const char* kDevelopers[] = { "Dmitry Chapyshev (dmitry@aspia.ru)" };
+
+// Who maintains this fork. Listed separately from the original author rather than replacing them.
+const char* kForkMaintainers[] = { "Ramil Mukhetdinov (ramil.r.m.nt@gmail.com)" };
 
 const char* kTranslators[] =
 {
@@ -121,14 +130,26 @@ AboutDialog::AboutDialog(const QString& application_name, QWidget* parent)
         QString("%1<br><a href='%2'>%2</a>")
         .arg(tr("You can also get a translation of GNU GPL license here:"), kGplTranslationLink);
 
+    // Required by GPLv3 section 5(a): a modified version must carry a prominent notice that it is
+    // modified. It also keeps the original author from being blamed for changes that are not
+    // theirs, and keeps this build from being mistaken for the official one.
+    QString fork_notice =
+        QString("<b>%1</b><br>%2")
+        .arg(tr("Unofficial build"),
+             tr("This is a fork of Aspia by Dmitry Chapyshev, with modifications by the fork "
+                "maintainer. It is not affiliated with or endorsed by the original author."));
+
     QString links =
-        QString("<b>%1</b><br>%2 <a href='%3'>%3</a><br>%4 <a href='%5'>%5</a>")
+        QString("<b>%1</b><br>%2 <a href='%3'>%3</a><br>%4 <a href='%5'>%5</a><br>%6 <a href='%7'>%7</a>")
         .arg(tr("Links:"),
              tr("Home page:"), kHomeLink,
-             tr("GitHub page:"), kGitHubLink);
+             tr("Original project:"), kGitHubLink,
+             tr("This fork:"), kForkLink);
 
     QString developers =
-        createList(tr("Developers:"), kDevelopers, std::size(kDevelopers));
+        createList(tr("Original author:"), kDevelopers, std::size(kDevelopers));
+    QString fork_maintainers =
+        createList(tr("Fork maintainer:"), kForkMaintainers, std::size(kForkMaintainers));
     QString translators =
         createList(tr("Translators:"), kTranslators, std::size(kTranslators));
     QString third_party =
@@ -137,10 +158,12 @@ AboutDialog::AboutDialog(const QString& application_name, QWidget* parent)
     QString html;
 
     html += "<html><body>";
+    html += "<p>" + fork_notice + "</p>";
     html += "<p>" + license + "</p>";
     html += "<p>" + license_translation + "</p>";
     html += "<p>" + links + "</p>";
     html += "<p>" + developers + "</p>";
+    html += "<p>" + fork_maintainers + "</p>";
     html += "<p>" + translators + "</p>";
     html += "<p>" + third_party + "</p>";
     html += "</body><html>";
