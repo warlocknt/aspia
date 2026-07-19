@@ -133,6 +133,7 @@ struct LoggingSettings
     //  min_log_level: LOG_INFO
     //  max_log_file_size: 2 Mb
     //  max_log_file_age: 14 days
+    //  max_log_dir_size: 256 Mb
     LoggingSettings();
 
     LoggingDestination destination;
@@ -140,8 +141,14 @@ struct LoggingSettings
 
     QString log_dir;
 
+    // Size at which a log file is rotated, and how long rotated files are kept.
     qint64 max_log_file_size;
     qint64 max_log_file_age;
+
+    // Total size the log directory may occupy. Once it is exceeded the oldest files are removed
+    // until it fits again, regardless of their age. Without this a process logging in a tight loop
+    // fills the disk with files that are all too young to expire. Zero disables the limit.
+    qint64 max_log_dir_size;
 };
 
 // Sets the log file name and other global logging state. Calling this function is recommended,

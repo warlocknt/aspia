@@ -42,6 +42,8 @@
 #include <sys/syslimits.h>
 #endif // defined(Q_OS_MACOS)
 
+#include <algorithm>
+
 #include <QDateTime>
 #include <QFile>
 #include <QDir>
@@ -57,11 +59,21 @@ const LoggingSeverity kDefaultLogLevel = LOG_FATAL;
 const qint64 kDefaultMaxLogFileSize = 2 * 1024 * 1024; // 2 Mb.
 const qint64 kDefaultMaxLogFileAge = 14; // 14 days.
 
+// Age alone does not bound the log directory. On 2026-07-16 a runaway capture loop on a working
+// machine wrote 28 GB in a single day - 14725 files, every one of them minutes old. Nothing was
+// old enough to be removed, so the cleanup ran on every rotation and correctly deleted nothing
+// while the disk filled up.
+//
+// 256 Mb is roughly 128 files at the default rotation size: enough history to diagnose a problem
+// that happened a while ago, small enough that no amount of logging can threaten the disk.
+const qint64 kDefaultMaxLogDirSize = 256 * 1024 * 1024; // 256 Mb.
+
 LoggingSeverity g_min_log_level = LOG_ERROR;
 LoggingDestination g_logging_destination = LOG_DEFAULT;
 
 qint64 g_max_log_file_size = kDefaultMaxLogFileSize;
 qint64 g_max_log_file_age = kDefaultMaxLogFileAge;
+qint64 g_max_log_dir_size = kDefaultMaxLogDirSize;
 int g_log_file_number = -1;
 
 QString g_log_dir_path;
@@ -84,16 +96,64 @@ const QString& severityName(LoggingSeverity severity)
 }
 
 //--------------------------------------------------------------------------------------------------
-void removeOldFiles(const QString& path, qint64 max_file_age)
+// Removes log files that are too old, and then, if the directory is still larger than allowed,
+// removes the oldest of what is left until it fits.
+//
+// The size pass is what actually bounds the directory: a process that logs fast enough fills the
+// disk with files that are all too young to expire, and an age-only cleanup watches it happen.
+void removeOldFiles(const QString& path, qint64 max_file_age, qint64 max_dir_size)
 {
-    QDateTime time = QDateTime::currentDateTime().addDays(-max_file_age);
     QDir current_dir(path);
 
-    QFileInfoList files = current_dir.entryInfoList();
-    for (const auto& file : std::as_const(files))
+    // Files only: the unfiltered listing this used to take also returned "." and ".." and any
+    // subdirectories, which were then handed to QFile::remove() to fail quietly.
+    QFileInfoList files = current_dir.entryInfoList(QDir::Files);
+
+    // Sorted here rather than through QDir::Time, which would leave the direction resting on a
+    // recollection of what Qt considers the default order. Getting that backwards would delete the
+    // newest files first - precisely the ones a size limit exists to preserve - and it would do so
+    // silently, so the ordering is spelled out instead of assumed.
+    std::sort(files.begin(), files.end(), [](const QFileInfo& left, const QFileInfo& right)
     {
-        if (file.birthTime() < time)
-            QFile::remove(file.filePath());
+        return left.lastModified() < right.lastModified();
+    });
+
+    if (max_file_age != 0)
+    {
+        const QDateTime oldest_allowed = QDateTime::currentDateTime().addDays(-max_file_age);
+
+        for (auto it = files.begin(); it != files.end();)
+        {
+            // Not every filesystem records a creation time, and comparing an invalid QDateTime
+            // gives an unspecified answer - which, if it came out as "older than the limit", would
+            // wipe the whole directory on every rotation. Fall back to the modification time,
+            // which a log file only has one of anyway.
+            QDateTime created = it->birthTime();
+            if (!created.isValid())
+                created = it->lastModified();
+
+            if (created.isValid() && created < oldest_allowed && QFile::remove(it->filePath()))
+                it = files.erase(it);
+            else
+                ++it;
+        }
+    }
+
+    if (max_dir_size == 0)
+        return;
+
+    qint64 total_size = 0;
+    for (const auto& file : std::as_const(files))
+        total_size += file.size();
+
+    // The file currently being written is the newest, so it is the last one this could ever reach.
+    // Removing it would fail anyway while it is open, which only costs an iteration.
+    for (auto it = files.begin(); it != files.end() && total_size > max_dir_size; ++it)
+    {
+        const qint64 file_size = it->size();
+
+        if (QFile::remove(it->filePath()))
+            total_size -= file_size;
     }
 }
 
@@ -245,8 +305,12 @@ bool initLoggingUnlocked(const QString& prefix)
     if (!g_log_file.open(QFile::WriteOnly | QFile::Append | QFile::Text))
         return false;
 
-    if (g_max_log_file_age != 0)
-        removeOldFiles(file_dir, g_max_log_file_age);
+    // Runs on every rotation rather than once at startup, so that a process which logs heavily is
+    // bounded while it runs and not only when it is restarted. That was expensive before, because
+    // the directory could grow to thousands of files and each rotation listed all of them; with the
+    // size limit in place it stays small, so listing it stays cheap.
+    if (g_max_log_file_age != 0 || g_max_log_dir_size != 0)
+        removeOldFiles(file_dir, g_max_log_file_age, g_max_log_dir_size);
 
     g_log_file_path = std::move(file_path);
     return true;
@@ -296,7 +360,8 @@ QDebug* g_swallow_stream;
 LoggingSettings::LoggingSettings()
     : min_log_level(kDefaultLogLevel),
       max_log_file_size(kDefaultMaxLogFileSize),
-      max_log_file_age(kDefaultMaxLogFileAge)
+      max_log_file_age(kDefaultMaxLogFileAge),
+      max_log_dir_size(kDefaultMaxLogDirSize)
 {
     if (qEnvironmentVariableIsSet("ASPIA_LOG_LEVEL"))
     {
@@ -366,6 +431,24 @@ LoggingSettings::LoggingSettings()
             max_log_file_age = static_cast<size_t>(std::min(value, 366));
         }
     }
+
+    if (qEnvironmentVariableIsSet("ASPIA_MAX_LOG_DIR_SIZE"))
+    {
+        bool ok = false;
+        int value = qEnvironmentVariableIntValue("ASPIA_MAX_LOG_DIR_SIZE", &ok);
+        if (ok)
+        {
+            // Zero switches the size limit off. Anything else is kept above the size of a single
+            // file, since a limit below that would delete every rotated file the moment it closed.
+            static const int kMaxValue = 8 * 1024 * 1024;
+
+            if (value == 0)
+                max_log_dir_size = 0;
+            else
+                max_log_dir_size = std::min(std::max<qint64>(value, max_log_file_size * 2),
+                                            static_cast<qint64>(kMaxValue) * 1024);
+        }
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -415,6 +498,7 @@ bool initLogging(const LoggingSettings& settings)
         g_log_dir_path = settings.log_dir;
         g_max_log_file_size = settings.max_log_file_size;
         g_max_log_file_age = settings.max_log_file_age;
+        g_max_log_dir_size = settings.max_log_dir_size;
 
         if (!initLoggingUnlocked(logFilePrefix()))
             return false;
