@@ -23,7 +23,94 @@
 #include "base/win/scoped_clipboard.h"
 #include "base/win/scoped_hglobal.h"
 
+#include <QStringList>
+
 namespace common {
+
+namespace {
+
+//--------------------------------------------------------------------------------------------------
+// GetClipboardFormatName() only knows about registered formats and fails for the predefined ones,
+// so those are named here. Anything not listed is reported by number, which is still enough to
+// recognize it later.
+QString standardFormatName(UINT format)
+{
+    switch (format)
+    {
+        case CF_TEXT:          return QStringLiteral("CF_TEXT");
+        case CF_BITMAP:        return QStringLiteral("CF_BITMAP");
+        case CF_METAFILEPICT:  return QStringLiteral("CF_METAFILEPICT");
+        case CF_SYLK:          return QStringLiteral("CF_SYLK");
+        case CF_DIF:           return QStringLiteral("CF_DIF");
+        case CF_TIFF:          return QStringLiteral("CF_TIFF");
+        case CF_OEMTEXT:       return QStringLiteral("CF_OEMTEXT");
+        case CF_DIB:           return QStringLiteral("CF_DIB");
+        case CF_PALETTE:       return QStringLiteral("CF_PALETTE");
+        case CF_RIFF:          return QStringLiteral("CF_RIFF");
+        case CF_WAVE:          return QStringLiteral("CF_WAVE");
+        case CF_UNICODETEXT:   return QStringLiteral("CF_UNICODETEXT");
+        case CF_ENHMETAFILE:   return QStringLiteral("CF_ENHMETAFILE");
+        case CF_HDROP:         return QStringLiteral("CF_HDROP");
+        case CF_LOCALE:        return QStringLiteral("CF_LOCALE");
+        case CF_DIBV5:         return QStringLiteral("CF_DIBV5");
+        default:               return QStringLiteral("unknown(%1)").arg(format);
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+// Names of every format currently on the clipboard, as one comma-separated string. The clipboard
+// must already be open: EnumClipboardFormats() requires it, unlike IsClipboardFormatAvailable().
+//
+// Only the names are collected, never the contents. Clipboards routinely carry passwords and other
+// secrets, and logs get gathered up and shipped elsewhere for analysis, so nothing that passes
+// through here may end up in one.
+QString availableFormats()
+{
+    QStringList formats;
+
+    UINT format = 0;
+    while ((format = EnumClipboardFormats(format)) != 0)
+    {
+        wchar_t name[128] = { 0 };
+
+        if (GetClipboardFormatNameW(format, name, static_cast<int>(std::size(name))) > 0)
+            formats << QStringLiteral("%1(%2)").arg(QString::fromWCharArray(name)).arg(format);
+        else
+            formats << standardFormatName(format);
+    }
+
+    return formats.join(QStringLiteral(", "));
+}
+
+//--------------------------------------------------------------------------------------------------
+// True when the clipboard holds a picture or a file list. Both are lost when only the text next to
+// them is taken, so they are worth noticing even on the path that succeeds.
+bool hasUnsupportedRichContent()
+{
+    return IsClipboardFormatAvailable(CF_DIB) ||
+           IsClipboardFormatAvailable(CF_BITMAP) ||
+           IsClipboardFormatAvailable(CF_HDROP);
+}
+
+//--------------------------------------------------------------------------------------------------
+// Records what the clipboard holds whenever it changes to something this class cannot pass on, so
+// that the formats worth implementing can be chosen from what actually turns up on working machines
+// rather than from guesswork.
+void logUnsupportedFormats(HWND owner)
+{
+    base::ScopedClipboard clipboard;
+    if (!clipboard.init(owner))
+        return;
+
+    const QString formats = availableFormats();
+    if (formats.isEmpty())
+        return;
+
+    LOG(INFO) << "Clipboard changed to content that is not supported. Available formats:"
+              << formats;
+}
+
+} // namespace
 
 //--------------------------------------------------------------------------------------------------
 ClipboardWin::ClipboardWin(QObject* parent)
@@ -142,7 +229,10 @@ bool ClipboardWin::onMessage(UINT message, WPARAM /* wParam */, LPARAM /* lParam
 void ClipboardWin::onClipboardUpdate()
 {
     if (!IsClipboardFormatAvailable(CF_UNICODETEXT))
+    {
+        logUnsupportedFormats(window_->hwnd());
         return;
+    }
 
     QString data;
 
@@ -172,6 +262,18 @@ void ClipboardWin::onClipboardUpdate()
             }
 
             data = QString::fromWCharArray(text_lock.get());
+        }
+
+        // The text was taken, but a picture or a file list was sitting next to it and is being
+        // dropped. Logged separately from the case above: this is where content is silently
+        // degraded rather than lost outright, and it is the more common of the two - applications
+        // usually offer text alongside whatever else they put on the clipboard.
+        //
+        // Done while the clipboard is still open, since enumerating the formats requires it.
+        if (hasUnsupportedRichContent())
+        {
+            LOG(INFO) << "Clipboard text taken, but unsupported rich content was present too. "
+                         "Available formats:" << availableFormats();
         }
     }
 
