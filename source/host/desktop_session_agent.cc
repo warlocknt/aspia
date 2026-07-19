@@ -552,6 +552,24 @@ void DesktopSessionAgent::captureScreen()
     if (!screen_capturer_)
     {
         LOG(ERROR) << "Screen capturer not initialized";
+
+        // Returning here without touching the timer used to leave it armed with a zero delay, so
+        // captureScreen() was re-entered on every iteration of the event loop. That saturated the
+        // event loop - the agent stopped responding to anything, including its own shutdown - and
+        // wrote the message above about ten thousand times a second (28 GB of logs in one day was
+        // observed on a working machine).
+        if (is_session_enabled_)
+        {
+            // Not expected: the capturer is created when the session is enabled. Poll slowly rather
+            // than spin, so that capture resumes if a capturer does appear.
+            screen_capture_timer_->start(std::chrono::milliseconds(250));
+        }
+        else
+        {
+            // The session is disabled and the capturer is gone for good. Nothing to capture until
+            // the session is enabled again, which starts the timer itself.
+            screen_capture_timer_->stop();
+        }
         return;
     }
 
@@ -648,6 +666,15 @@ void DesktopSessionAgent::captureScreen()
 void DesktopSessionAgent::scheduleNextCapture(const std::chrono::milliseconds& update_interval)
 {
     capture_scheduler_.onEndCapture();
+
+    // A next_screen_capture message can still arrive after the session has been disabled: it was
+    // already on its way when DISABLE was handled. Re-arming the timer for it restarted capture
+    // with no capturer present, which is how the busy loop in captureScreen() was entered.
+    if (!is_session_enabled_)
+    {
+        LOG(INFO) << "Capture request for a disabled session ignored";
+        return;
+    }
 
     if (update_interval == std::chrono::milliseconds::zero())
     {
