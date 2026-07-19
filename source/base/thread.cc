@@ -21,6 +21,8 @@
 #include "base/asio_event_dispatcher.h"
 #include "base/logging.h"
 
+#include <optional>
+
 #if defined(Q_OS_WINDOWS)
 #include "base/win/scoped_com_initializer.h"
 #endif // defined(Q_OS_WINDOWS)
@@ -29,7 +31,8 @@ namespace base {
 
 //--------------------------------------------------------------------------------------------------
 Thread::Thread(EventDispatcher dispatcher, QObject* parent)
-    : QThread(parent)
+    : QThread(parent),
+      dispatcher_(dispatcher)
 {
     if (dispatcher == AsioDispatcher)
         setEventDispatcher(new AsioEventDispatcher());
@@ -46,11 +49,25 @@ void Thread::stop()
 void Thread::run()
 {
 #if defined(Q_OS_WINDOWS)
-    ScopedCOMInitializer com_initializer;
-    CHECK(com_initializer.isSucceeded());
+    // Asio threads join the multithreaded apartment. The default single threaded apartment creates
+    // a hidden OLE message window on the thread, and WASAPI - the reason any of this matters here -
+    // expects to be driven from an MTA.
+    std::optional<ScopedCOMInitializer> com_initializer;
+
+    if (dispatcher_ == AsioDispatcher)
+        com_initializer.emplace(ScopedCOMInitializer::kMTA);
+    else
+        com_initializer.emplace();
+
+    CHECK(com_initializer->isSucceeded());
 #endif // defined(Q_OS_WINDOWS)
 
+    // Emitted here rather than relying on QThread::started, which fires before run() is entered:
+    // anything it triggers would run without an apartment. Likewise sig_afterRunning below goes out
+    // while the apartment is still up, so that COM objects can be released before it is torn down.
+    emit sig_beforeRunning();
     exec();
+    emit sig_afterRunning();
 }
 
 } // namespace base

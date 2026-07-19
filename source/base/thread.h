@@ -25,6 +25,8 @@ namespace base {
 
 class Thread final : public QThread
 {
+    Q_OBJECT
+
 public:
     enum EventDispatcher { AsioDispatcher, QtDispatcher };
 
@@ -32,11 +34,27 @@ public:
 
     void stop();
 
+signals:
+    // Use these instead of QThread::started and QThread::finished for anything that has to run on
+    // the thread itself.
+    //
+    // started() is emitted before run() begins and finished() after it returns, which leaves both
+    // of them outside the window where this thread's COM apartment exists. Work driven by started()
+    // reaches COM before it has been initialized - that is how audio capture came to fail with
+    // CO_E_NOTINITIALIZED on every attempt - and cleanup driven by finished() releases COM objects
+    // after CoUninitialize has already run.
+    //
+    // These two are emitted from inside run(), where the apartment is in place.
+    void sig_beforeRunning();
+    void sig_afterRunning();
+
 protected:
     // QThread implementation.
     void run() final;
 
 private:
+    const EventDispatcher dispatcher_;
+
     Q_DISABLE_COPY(Thread)
 };
 

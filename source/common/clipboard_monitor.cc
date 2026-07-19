@@ -1,4 +1,4 @@
-//
+﻿//
 // Aspia Project
 // Copyright (C) 2016-2025 Dmitry Chapyshev <dmitry@aspia.ru>
 //
@@ -49,9 +49,9 @@ ClipboardMonitor::ClipboardMonitor(QObject* parent)
 {
     LOG(INFO) << "Ctor";
 
-    connect(&thread_, &base::Thread::started, this, &ClipboardMonitor::onBeforeThreadRunning,
+    connect(&thread_, &base::Thread::sig_beforeRunning, this, &ClipboardMonitor::onBeforeThreadRunning,
             Qt::DirectConnection);
-    connect(&thread_, &base::Thread::finished, this, &ClipboardMonitor::onAfterThreadRunning,
+    connect(&thread_, &base::Thread::sig_afterRunning, this, &ClipboardMonitor::onAfterThreadRunning,
             Qt::DirectConnection);
 }
 

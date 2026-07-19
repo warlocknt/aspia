@@ -1,4 +1,4 @@
-//
+﻿//
 // Aspia Project
 // Copyright (C) 2016-2025 Dmitry Chapyshev <dmitry@aspia.ru>
 //
@@ -48,9 +48,9 @@ DesktopSessionAgent::DesktopSessionAgent(QObject* parent)
 {
     LOG(INFO) << "Ctor";
 
-    connect(&ui_thread_, &base::Thread::started, this, &DesktopSessionAgent::onBeforeThreadRunning,
+    connect(&ui_thread_, &base::Thread::sig_beforeRunning, this, &DesktopSessionAgent::onBeforeThreadRunning,
             Qt::DirectConnection);
-    connect(&ui_thread_, &base::Thread::finished, this, &DesktopSessionAgent::onAfterThreadRunning,
+    connect(&ui_thread_, &base::Thread::sig_afterRunning, this, &DesktopSessionAgent::onAfterThreadRunning,
             Qt::DirectConnection);
 
 #if defined(Q_OS_WINDOWS)

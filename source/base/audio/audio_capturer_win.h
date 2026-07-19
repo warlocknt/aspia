@@ -1,4 +1,4 @@
-//
+﻿//
 // Aspia Project
 // Copyright (C) 2016-2025 Dmitry Chapyshev <dmitry@aspia.ru>
 //
@@ -22,7 +22,6 @@
 #include <QTimer>
 
 #include "base/win/scoped_co_mem.h"
-#include "base/win/scoped_com_initializer.h"
 #include "base/audio/audio_capturer.h"
 #include "base/audio/audio_volume_filter_win.h"
 
@@ -68,17 +67,6 @@ private:
     void doCapture();
 
     void onCaptureTimeout();
-
-    // Declared before everything else on purpose. COM has to be initialized on this thread before
-    // any of the interfaces below can be created, and it must not be uninitialized until they have
-    // all been released - which is what declaring it first buys, since members are destroyed in
-    // reverse order of declaration.
-    //
-    // This object lives on the audio capture thread: it is created and destroyed there together
-    // with the capturer, and COM is initialized per thread, so initializing it anywhere else would
-    // not help. Without it every attempt to create the device enumerator fails with
-    // CO_E_NOTINITIALIZED and audio capture never works at all.
-    ScopedCOMInitializer com_initializer_ { ScopedCOMInitializer::kMTA };
 
     PacketCapturedCallback callback_;
 

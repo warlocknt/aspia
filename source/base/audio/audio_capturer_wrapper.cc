@@ -1,4 +1,4 @@
-//
+﻿//
 // Aspia Project
 // Copyright (C) 2016-2025 Dmitry Chapyshev <dmitry@aspia.ru>
 //
@@ -30,9 +30,9 @@ AudioCapturerWrapper::AudioCapturerWrapper(QObject* parent)
 {
     LOG(INFO) << "Ctor";
 
-    connect(&thread_, &Thread::started, this, &AudioCapturerWrapper::onBeforeThreadRunning,
+    connect(&thread_, &Thread::sig_beforeRunning, this, &AudioCapturerWrapper::onBeforeThreadRunning,
             Qt::DirectConnection);
-    connect(&thread_, &Thread::finished, this, &AudioCapturerWrapper::onAfterThreadRunning,
+    connect(&thread_, &Thread::sig_afterRunning, this, &AudioCapturerWrapper::onAfterThreadRunning,
             Qt::DirectConnection);
 }
 
