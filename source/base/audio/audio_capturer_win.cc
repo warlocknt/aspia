@@ -66,6 +66,12 @@ AudioCapturerWin::AudioCapturerWin(QObject* parent)
 {
     LOG(INFO) << "Ctor";
 
+    // Reported rather than treated as fatal: everything below will fail on its own and say so, and
+    // losing audio is not a reason to take the session down with it. This line is what turns a
+    // string of unexplained CO_E_NOTINITIALIZED failures into an obvious cause.
+    if (!com_initializer_.isSucceeded())
+        LOG(ERROR) << "COM initialization failed, audio capture will not work";
+
     connect(capture_timer_, &QTimer::timeout, this, &AudioCapturerWin::onCaptureTimeout);
 }
 
