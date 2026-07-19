@@ -24,8 +24,6 @@ namespace common {
 
 namespace {
 
-const char kMimeTypeTextUtf8[] = "text/plain; charset=UTF-8";
-
 // A message that does not fit into base::NetworkChannel::kMaxMessageSize (7 MB) is not merely
 // refused: the channel reports INVALID_PROTOCOL and the connection is dropped. Copying a large
 // enough block of text would therefore end the session, which is a poor trade for a clipboard that
@@ -38,6 +36,9 @@ const char kMimeTypeTextUtf8[] = "text/plain; charset=UTF-8";
 const size_t kMaxClipboardDataSize = 4 * 1024 * 1024; // 4 MB
 
 } // namespace
+
+const QString Clipboard::kMimeTypeTextUtf8 = QStringLiteral("text/plain; charset=UTF-8");
+const QString Clipboard::kMimeTypeImagePng = QStringLiteral("image/png");
 
 //--------------------------------------------------------------------------------------------------
 Clipboard::Clipboard(QObject* parent)
@@ -65,47 +66,49 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
         return;
     }
 
-    if (event.mime_type() == kMimeTypeTextUtf8)
+    const QString mime_type = QString::fromStdString(event.mime_type());
+
+    if (mime_type != kMimeTypeTextUtf8 && mime_type != kMimeTypeImagePng)
     {
-        // Store last injected data.
-        last_data_ = QString::fromStdString(event.data());
-    }
-    else
-    {
-        LOG(ERROR) << "Unsupported mime type:" << event.mime_type();
+        LOG(ERROR) << "Unsupported mime type:" << mime_type;
         return;
     }
 
-    setData(last_data_);
+    // Remembered before it is applied: putting it on the clipboard raises a change notification,
+    // and without this the content would be sent straight back to the side it came from.
+    last_mime_type_ = mime_type;
+
+    // The size was checked against kMaxClipboardDataSize above, so it fits the int this takes.
+    last_data_ = QByteArray(event.data().data(), static_cast<int>(event.data().size()));
+
+    setData(last_mime_type_, last_data_);
 }
 
 //--------------------------------------------------------------------------------------------------
 void Clipboard::clearClipboard()
 {
-    setData(QString());
+    setData(kMimeTypeTextUtf8, QByteArray());
 }
 
 //--------------------------------------------------------------------------------------------------
-void Clipboard::onData(const QString& data)
+void Clipboard::onData(const QString& mime_type, const QByteArray& data)
 {
-    if (last_data_ == data)
+    if (mime_type == last_mime_type_ && data == last_data_)
         return;
-
-    std::string utf8_data = data.toStdString();
 
     // Dropping the event costs the user a clipboard that did not travel. Sending it would cost
     // them the whole session, because the channel treats an oversized message as a protocol
     // violation and disconnects.
-    if (utf8_data.size() > kMaxClipboardDataSize)
+    if (static_cast<size_t>(data.size()) > kMaxClipboardDataSize)
     {
-        LOG(WARNING) << "Clipboard data is too large to send:" << utf8_data.size()
+        LOG(WARNING) << "Clipboard data is too large to send:" << data.size()
                      << "bytes (limit" << kMaxClipboardDataSize << "). Not synchronized.";
         return;
     }
 
     proto::desktop::ClipboardEvent event;
-    event.set_mime_type(kMimeTypeTextUtf8);
-    event.set_data(std::move(utf8_data));
+    event.set_mime_type(mime_type.toStdString());
+    event.set_data(data.constData(), static_cast<size_t>(data.size()));
 
     emit sig_clipboardEvent(event);
 }

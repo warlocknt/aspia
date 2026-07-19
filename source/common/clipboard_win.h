@@ -40,10 +40,21 @@ public:
 protected:
     // Clipboard implementation.
     void init() final;
-    void setData(const QString& data) final;
+    void setData(const QString& mime_type, const QByteArray& data) final;
 
 private:
     void onClipboardUpdate();
+
+    // |data| is UTF-8. Windows wants UTF-16 on the clipboard, so it is converted here rather than
+    // by the caller, which has no reason to know that.
+    void setDataText(const QByteArray& data);
+
+    // |data| is a PNG. Windows has no notion of that on the clipboard, so it is converted to a
+    // device independent bitmap, which every Windows application understands.
+    void setDataImage(const QByteArray& data);
+
+    void onClipboardText();
+    void onClipboardImage();
 
     // Handles messages received by |window_|.
     bool onMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result);

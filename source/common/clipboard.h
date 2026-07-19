@@ -33,6 +33,12 @@ public:
     explicit Clipboard(QObject* parent);
     virtual ~Clipboard() = default;
 
+    // The content types that can travel through the clipboard. Anything else is dropped, and what
+    // was dropped is recorded by the platform implementation so that the list can grow from what
+    // actually turns up rather than from guesswork.
+    static const QString kMimeTypeTextUtf8;
+    static const QString kMimeTypeImagePng;
+
 public slots:
     void start();
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
@@ -43,11 +49,18 @@ signals:
 
 protected:
     virtual void init() = 0;
-    virtual void setData(const QString& data) = 0;
-    void onData(const QString& data);
+
+    // Content is carried as a mime type and raw bytes rather than as text: an image is not a
+    // string, and neither is a file list. For text the bytes are UTF-8.
+    virtual void setData(const QString& mime_type, const QByteArray& data) = 0;
+    void onData(const QString& mime_type, const QByteArray& data);
 
 private:
-    QString last_data_;
+    // What was last injected from the other side. The platform implementation reports that as a
+    // clipboard change of its own, and without remembering it the content would be sent straight
+    // back where it came from.
+    QString last_mime_type_;
+    QByteArray last_data_;
 };
 
 } // namespace common
