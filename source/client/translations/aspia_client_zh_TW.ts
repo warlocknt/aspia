@@ -770,6 +770,11 @@
     </message>
     <message>
         <location filename="../ui/file_transfer/file_error_code.cc" line="89"/>
+        <source>The computer is locked. Unlock it to transfer files</source>
+        <translation>電腦已鎖定。請解鎖後再傳輸檔案</translation>
+    </message>
+    <message>
+        <location filename="../ui/file_transfer/file_error_code.cc" line="93"/>
         <source>Unknown error code</source>
         <translation>未知的錯誤碼</translation>
     </message>

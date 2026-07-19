@@ -762,6 +762,11 @@
     </message>
     <message>
         <location filename="../ui/file_transfer/file_error_code.cc" line="89"/>
+        <source>The computer is locked. Unlock it to transfer files</source>
+        <translation>计算机已锁定。请解锁后再传输文件</translation>
+    </message>
+    <message>
+        <location filename="../ui/file_transfer/file_error_code.cc" line="93"/>
         <source>Unknown error code</source>
         <translation>未知错误代码</translation>
     </message>

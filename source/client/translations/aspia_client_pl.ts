@@ -647,6 +647,11 @@
     </message>
     <message>
         <location filename="../ui/file_transfer/file_error_code.cc" line="89"/>
+        <source>The computer is locked. Unlock it to transfer files</source>
+        <translation>Komputer jest zablokowany. Odblokuj go, aby przesyłać pliki</translation>
+    </message>
+    <message>
+        <location filename="../ui/file_transfer/file_error_code.cc" line="93"/>
         <source>Unknown error code</source>
         <translation type="unfinished"></translation>
     </message>

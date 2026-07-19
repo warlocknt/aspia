@@ -762,6 +762,11 @@
     </message>
     <message>
         <location filename="../ui/file_transfer/file_error_code.cc" line="89"/>
+        <source>The computer is locked. Unlock it to transfer files</source>
+        <translation>De computer is vergrendeld. Ontgrendel deze om bestanden over te dragen</translation>
+    </message>
+    <message>
+        <location filename="../ui/file_transfer/file_error_code.cc" line="93"/>
         <source>Unknown error code</source>
         <translation>Onbekende error code</translation>
     </message>

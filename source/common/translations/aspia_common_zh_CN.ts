@@ -223,162 +223,190 @@
         <translation type="vanished">版本： %1</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="111"/>
+        <location filename="../ui/about_dialog.cc" line="120"/>
         <source>Version: %1 (%2)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="116"/>
+        <location filename="../ui/about_dialog.cc" line="125"/>
         <source>Aspia is free software released under GNU General Public License 3.</source>
         <translation>Aspia是根据以下版本发布的免费软件GNU通用公共许可证3。</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="117"/>
+        <location filename="../ui/about_dialog.cc" line="126"/>
         <source>You can get a copy of license here:</source>
         <translation>您可以在此处获取许可证副本：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="122"/>
+        <location filename="../ui/about_dialog.cc" line="131"/>
         <source>You can also get a translation of GNU GPL license here:</source>
         <translation>您还可以在这里获得GNU GPL许可证的翻译：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="126"/>
+        <location filename="../ui/about_dialog.cc" line="138"/>
+        <source>Unofficial build</source>
+        <translation>非官方版本</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="139"/>
+        <source>This is a fork of Aspia by Dmitry Chapyshev, with modifications by the fork maintainer. It is not affiliated with or endorsed by the original author.</source>
+        <translation>这是 Dmitry Chapyshev 所开发 Aspia 的一个分支(fork)，由分支维护者进行了修改。它与原作者无关，也未获得其认可。</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="144"/>
         <source>Links:</source>
         <translation>链接：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="127"/>
+        <location filename="../ui/about_dialog.cc" line="145"/>
         <source>Home page:</source>
         <translation>主页：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="128"/>
         <source>GitHub page:</source>
-        <translation>GitHub页面：</translation>
+        <translation type="vanished">GitHub页面：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="131"/>
         <source>Developers:</source>
-        <translation>开发人员：</translation>
+        <translation type="vanished">开发人员：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="133"/>
+        <location filename="../ui/about_dialog.cc" line="146"/>
+        <source>Original project:</source>
+        <translation>原始项目：</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="147"/>
+        <source>This fork:</source>
+        <translation>本分支：</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="150"/>
+        <source>Original author:</source>
+        <translation>原作者：</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="152"/>
+        <source>Fork maintainer:</source>
+        <translation>分支维护者：</translation>
+    </message>
+    <message>
+        <location filename="../ui/about_dialog.cc" line="154"/>
         <source>Translators:</source>
         <translation>翻译成员：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="135"/>
+        <location filename="../ui/about_dialog.cc" line="156"/>
         <source>Third-party components:</source>
         <translation>第三方组件：</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="156"/>
+        <location filename="../ui/about_dialog.cc" line="179"/>
         <source>Path: %1</source>
         <translation>路径： %1</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="157"/>
+        <location filename="../ui/about_dialog.cc" line="180"/>
         <source>Compilation date: %1</source>
         <translation>编译日期：%1</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="158"/>
+        <location filename="../ui/about_dialog.cc" line="181"/>
         <source>Compilation time: %1</source>
         <translation>编译时间： %1</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="161"/>
+        <location filename="../ui/about_dialog.cc" line="184"/>
         <source>Git branch: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="162"/>
+        <location filename="../ui/about_dialog.cc" line="185"/>
         <source>Git commit: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="165"/>
+        <location filename="../ui/about_dialog.cc" line="188"/>
         <source>Logging directory: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="166"/>
+        <location filename="../ui/about_dialog.cc" line="189"/>
         <source>Logging file: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="176"/>
+        <location filename="../ui/about_dialog.cc" line="199"/>
         <source>Display &apos;%1&apos;</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="177"/>
+        <location filename="../ui/about_dialog.cc" line="200"/>
         <source>Pixel ratio: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="178"/>
+        <location filename="../ui/about_dialog.cc" line="201"/>
         <source>Logical DPI: %1x%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="181"/>
+        <location filename="../ui/about_dialog.cc" line="204"/>
         <source>Physical DPI: %1x%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="186"/>
+        <location filename="../ui/about_dialog.cc" line="209"/>
         <source>Size: %1x%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="189"/>
+        <location filename="../ui/about_dialog.cc" line="212"/>
         <source>Available size: %1x%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="193"/>
+        <location filename="../ui/about_dialog.cc" line="216"/>
         <source>Virtual size: %1x%2</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="196"/>
+        <location filename="../ui/about_dialog.cc" line="219"/>
         <source>Depth: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="197"/>
+        <location filename="../ui/about_dialog.cc" line="220"/>
         <source>Refresh rate: %1</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="202"/>
+        <location filename="../ui/about_dialog.cc" line="225"/>
         <source>%1 version: %2</source>
         <translation>%1 版本： %2</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="248"/>
+        <location filename="../ui/about_dialog.cc" line="271"/>
         <source>Save to file...</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="256"/>
+        <location filename="../ui/about_dialog.cc" line="279"/>
         <source>Save File</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="258"/>
+        <location filename="../ui/about_dialog.cc" line="281"/>
         <source>TXT files (*.txt)</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="273"/>
+        <location filename="../ui/about_dialog.cc" line="296"/>
         <source>Warning</source>
         <translation type="unfinished">警告</translation>
     </message>
     <message>
-        <location filename="../ui/about_dialog.cc" line="274"/>
+        <location filename="../ui/about_dialog.cc" line="297"/>
         <source>Could not open file for writing.</source>
         <translation type="unfinished"></translation>
     </message>
