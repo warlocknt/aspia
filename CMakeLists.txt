@@ -28,9 +28,9 @@ if (WIN32)
     include(FindWDK)
 endif()
 
-set(ASPIA_VERSION_MAJOR 3)
-set(ASPIA_VERSION_MINOR 0)
-set(ASPIA_VERSION_PATCH 4)
+set(ASPIA_VERSION_MAJOR 2)
+set(ASPIA_VERSION_MINOR 8)
+set(ASPIA_VERSION_PATCH 0)
 
 # On CI installed dir could be outside of vcpkg root
 if ("$ENV{VCPKG_INSTALLED_DIR}" STREQUAL "")
