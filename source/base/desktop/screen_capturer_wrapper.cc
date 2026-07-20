@@ -27,6 +27,7 @@
 
 #if defined(Q_OS_WINDOWS)
 #include "base/desktop/screen_capturer_win.h"
+#include "base/win/windows_version.h"
 #elif defined(Q_OS_LINUX)
 #include "base/desktop/screen_capturer_x11.h"
 #elif defined(Q_OS_MACOS)
@@ -147,6 +148,24 @@ ScreenCapturer::Error ScreenCapturerWrapper::captureFrame(
         LOG(ERROR) << "Screen capturer NOT initialized";
         return ScreenCapturer::Error::TEMPORARY;
     }
+
+#if defined(Q_OS_WINDOWS)
+    if (dxgi_fallback_)
+    {
+        // The capturer is chosen once, so a session that fell back to GDI would otherwise stay
+        // slow until the client reconnects - even though DXGI typically becomes available again
+        // seconds later (once the machine finishes waking up or the login desktop appears).
+        // Re-run the selection at a low rate; each attempt resets the timer, so this repeats
+        // until DXGI sticks and costs one selection per interval at worst.
+        const auto kRetryInterval = std::chrono::seconds(30);
+
+        if (std::chrono::steady_clock::now() - last_capturer_retry_ >= kRetryInterval)
+        {
+            LOG(INFO) << "Session is on the GDI fallback, retrying the preferred capturer";
+            selectCapturer(ScreenCapturer::Error::SUCCEEDED);
+        }
+    }
+#endif // defined(Q_OS_WINDOWS)
 
     screen_capturer_->switchToInputDesktop();
 
@@ -310,6 +329,29 @@ void ScreenCapturerWrapper::selectCapturer(ScreenCapturer::Error last_error)
     }
 
     LOG(INFO) << "Selected screen capturer:" << screen_capturer_->type();
+
+#if defined(Q_OS_WINDOWS)
+    // Landing on GDI while DXGI was expected means the fallback fired - seen in the field when
+    // the agent started during a suspend and no D3D device existed for those few seconds. GDI
+    // works but captures with a CPU copy, which the operator experiences as a jerky session.
+    // Remember that this is a fallback, so captureFrame() can periodically try DXGI again.
+    //
+    // A PERMANENT capture error is excluded on purpose: that reset to GDI is deliberate, and
+    // retrying DXGI right after it would loop between the two.
+    dxgi_fallback_ =
+        (preferred_type_ == ScreenCapturer::Type::DEFAULT ||
+         preferred_type_ == ScreenCapturer::Type::WIN_DXGI) &&
+        windowsVersion() >= VERSION_WIN8 &&
+        screen_capturer_->type() == ScreenCapturer::Type::WIN_GDI &&
+        last_error != ScreenCapturer::Error::PERMANENT;
+    last_capturer_retry_ = std::chrono::steady_clock::now();
+
+    if (dxgi_fallback_)
+    {
+        LOG(WARNING) << "GDI capturer is a fallback, DXGI was expected but is unavailable. "
+                        "Will retry DXGI periodically";
+    }
+#endif // defined(Q_OS_WINDOWS)
 
     connect(screen_capturer_, &ScreenCapturer::sig_screenTypeChanged,
             this, &ScreenCapturerWrapper::sig_screenTypeChanged);

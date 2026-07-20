@@ -21,6 +21,8 @@
 
 #include <QPointer>
 
+#include <chrono>
+
 #include "base/desktop/screen_capturer.h"
 
 namespace base {
@@ -61,6 +63,16 @@ private:
 
     int screen_count_ = 0;
     ScreenCapturer::ScreenId last_screen_id_ = ScreenCapturer::kInvalidScreenId;
+
+#if defined(Q_OS_WINDOWS)
+    // Set when DXGI was expected but selection fell back to GDI for a transient reason - the
+    // observed case being an agent that started while the machine was suspending, when no D3D
+    // device existed. The capturer is chosen once per session, so without a retry the session
+    // stays on the slow GDI path even after the machine wakes up and DXGI becomes available
+    // again; the only cure used to be reconnecting.
+    bool dxgi_fallback_ = false;
+    std::chrono::steady_clock::time_point last_capturer_retry_;
+#endif
     Point last_cursor_pos_;
     bool enable_cursor_position_ = false;
 
