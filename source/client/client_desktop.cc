@@ -28,6 +28,7 @@
 #include "base/desktop/frame_qimage.h"
 #include "base/desktop/mouse_cursor.h"
 #include "client/config_factory.h"
+#include "common/clipboard.h"
 #include "common/desktop_session_constants.h"
 
 namespace client {
@@ -143,6 +144,16 @@ void ClientDesktop::onClipboardEvent(const proto::desktop::ClipboardEvent& event
 {
     if (!input_event_filter_.sendClipboardEvent(event))
         return;
+
+    // A host that has not declared the extension drops image events without a trace, and the
+    // operator is left wondering why the picture never arrived. Better not to send at all and
+    // say why here.
+    if (event.mime_type() == common::Clipboard::kMimeTypeImagePng.toStdString() &&
+        !host_supports_clipboard_image_)
+    {
+        LOG(INFO) << "Clipboard image not sent: host does not support clipboard images";
+        return;
+    }
 
     outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
     sendMessage(outgoing_message_.serialize());
@@ -458,6 +469,24 @@ void ClientDesktop::onMetricsRequest()
 void ClientDesktop::readCapabilities(const proto::desktop::Capabilities& capabilities)
 {
     LOG(INFO) << "Capabilities received";
+
+    const QStringList extensions =
+        QString::fromStdString(capabilities.extensions()).split(';', Qt::SkipEmptyParts);
+
+    host_supports_clipboard_image_ = extensions.contains(common::kClipboardImageExtension);
+    LOG(INFO) << "Host supports clipboard images:" << host_supports_clipboard_image_;
+
+    if (host_supports_clipboard_image_)
+    {
+        // Tell the host this client takes images too. The host needs to know before it forwards
+        // an image from its side of the clipboard, and it cannot tell from the protocol alone -
+        // an old client drops unknown mime types just as silently as an old host does. Announced
+        // only when the host has declared the extension, so an old host never sees it.
+        proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
+        extension->set_name(common::kClipboardImageExtension);
+
+        sendMessage(outgoing_message_.serialize());
+    }
 
     // We notify the window about changes in the list of extensions and video encodings.
     // A window can disable/enable some of its capabilities in accordance with this information.

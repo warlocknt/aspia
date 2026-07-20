@@ -136,6 +136,11 @@ private:
 
     bool started_ = false;
 
+    // Whether the host declared the clipboard_image extension. Hosts built before 3.0.4 silently
+    // drop image/png clipboard events, so images are only sent once the host has said it takes
+    // them; text keeps flowing either way.
+    bool host_supports_clipboard_image_ = false;
+
     std::shared_ptr<base::Frame> desktop_frame_;
     proto::desktop::Config desktop_config_;
 

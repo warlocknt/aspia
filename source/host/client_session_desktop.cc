@@ -28,6 +28,7 @@
 #include "base/desktop/frame_simple.h"
 #include "base/desktop/mouse_cursor.h"
 #include "base/desktop/screen_capturer.h"
+#include "common/clipboard.h"
 #include "common/desktop_session_constants.h"
 #include "host/desktop_session_manager.h"
 #include "host/video_encode_worker.h"
@@ -482,6 +483,16 @@ void ClientSessionDesktop::injectClipboardEvent(const proto::desktop::ClipboardE
 {
     if (sessionType() == proto::peer::SESSION_TYPE_DESKTOP_MANAGE)
     {
+        // A client that has not announced the extension drops image events without a trace, so
+        // do not spend the bandwidth - a 4 MB screenshot travelling into silence is the worst
+        // case. Text keeps flowing to any client.
+        if (event.mime_type() == common::Clipboard::kMimeTypeImagePng.toStdString() &&
+            !client_supports_clipboard_image_)
+        {
+            LOG(INFO) << "Clipboard image not sent: client does not support clipboard images";
+            return;
+        }
+
         outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
         sendMessage(outgoing_message_.serialize());
         stat_counter_.addOutgoingClipboardEvent();
@@ -514,6 +525,13 @@ void ClientSessionDesktop::readExtension(const proto::desktop::Extension& extens
     else if (extension.name() == common::kAudioPauseExtension)
     {
         readAudioPauseExtension(extension.data());
+    }
+    else if (extension.name() == common::kClipboardImageExtension)
+    {
+        // The client announces this only after seeing the extension in our capabilities, so old
+        // clients never send it - and without it we do not forward images to them.
+        LOG(INFO) << "Client supports clipboard images";
+        client_supports_clipboard_image_ = true;
     }
     else if (extension.name() == common::kPowerControlExtension)
     {

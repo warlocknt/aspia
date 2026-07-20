@@ -128,6 +128,10 @@ private:
     bool is_video_paused_ = false;
     bool is_audio_paused_ = false;
 
+    // Set when the client announces the clipboard_image extension. Without it clipboard images
+    // are not forwarded to this client - it would drop them silently anyway.
+    bool client_supports_clipboard_image_ = false;
+
     QPointer<QTimer> overflow_detection_timer_;
     size_t write_overflow_count_ = 0;
     size_t write_normal_count_ = 1;

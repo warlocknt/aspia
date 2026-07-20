@@ -33,10 +33,16 @@ const char kVideoPauseExtension[] = "video_pause";
 const char kAudioPauseExtension[] = "audio_pause";
 const char kScreenTypeExtension[] = "screen_type";
 
+// Clipboard images (mime image/png in ClipboardEvent) appeared in this fork in 3.0.4. A peer
+// that does not list this extension silently drops such events, so each side sends images only
+// after the other has declared support: the host by listing the extension in its capabilities,
+// the client by echoing this extension back once it sees the host has it.
+const char kClipboardImageExtension[] = "clipboard_image";
+
 #if defined(Q_OS_WINDOWS)
 const char kSupportedExtensionsForManage[] =
     "select_screen;preferred_size;power_control;remote_update;system_info;video_recording;"
-    "task_manager;video_pause;audio_pause;screen_type";
+    "task_manager;video_pause;audio_pause;screen_type;clipboard_image";
 
 const char kSupportedExtensionsForView[] =
     "select_screen;preferred_size;system_info;video_recording;video_pause;audio_pause;screen_type";
