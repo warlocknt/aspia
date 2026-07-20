@@ -216,6 +216,12 @@ const MouseCursor* ScreenCapturerGdi::captureCursor()
     curr_cursor_info_.cbSize = sizeof(curr_cursor_info_);
     if (GetCursorInfo(&curr_cursor_info_))
     {
+        if (cursor_info_failure_reported_)
+        {
+            LOG(INFO) << "GetCursorInfo recovered";
+            cursor_info_failure_reported_ = false;
+        }
+
         if (!isSameCursorShape(curr_cursor_info_, prev_cursor_info_))
         {
             if (curr_cursor_info_.flags == 0)
@@ -248,7 +254,13 @@ const MouseCursor* ScreenCapturerGdi::captureCursor()
     }
     else
     {
-        PLOG(ERROR) << "GetCursorInfo failed";
+        // Fails persistently on the secure desktop (access denied) and runs per captured frame,
+        // so report the start of the failure and the recovery instead of every occurrence.
+        if (!cursor_info_failure_reported_)
+        {
+            PLOG(ERROR) << "GetCursorInfo failed (repeats are not logged until it recovers)";
+            cursor_info_failure_reported_ = true;
+        }
     }
 
     return nullptr;

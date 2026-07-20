@@ -67,14 +67,15 @@ Desktop Desktop::desktop(const wchar_t* desktop_name)
 
 //--------------------------------------------------------------------------------------------------
 // static
-Desktop Desktop::inputDesktop()
+Desktop Desktop::inputDesktop(bool log_on_failure)
 {
     const ACCESS_MASK desired_access = GENERIC_READ | GENERIC_WRITE | GENERIC_EXECUTE;
 
     HDESK desktop = OpenInputDesktop(0, FALSE, desired_access);
     if (!desktop)
     {
-        PLOG(ERROR) << "OpenInputDesktop failed";
+        if (log_on_failure)
+            PLOG(ERROR) << "OpenInputDesktop failed";
         return Desktop();
     }
 

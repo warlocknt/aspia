@@ -32,7 +32,12 @@ public:
     ~Desktop();
 
     // Returns the desktop currently receiving user input or NULL if an error occurs.
-    static Desktop inputDesktop();
+    //
+    // |log_on_failure| exists for callers that poll: a process waiting for the secure desktop to
+    // go away gets an expected ACCESS_DENIED on every attempt, and logging each one produced
+    // over a hundred identical error lines per lock. Such callers pass false and report the
+    // outcome themselves, once.
+    static Desktop inputDesktop(bool log_on_failure = true);
 
     // Returns the desktop by its name or NULL if an error occurs.
     static Desktop desktop(const wchar_t* desktop_name);

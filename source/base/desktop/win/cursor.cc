@@ -118,10 +118,25 @@ MouseCursor* mouseCursorFromHCursor(HDC dc, HCURSOR cursor)
     ICONINFO icon_info;
     memset(&icon_info, 0, sizeof(icon_info));
 
+    // The cursor can stay unreadable for long stretches - on the secure desktop, or while the
+    // handle churns during a desktop switch - and this runs for every captured frame. Log the
+    // failure when it starts and the recovery when it ends, not thirty times a second in between.
+    static bool failure_reported = false;
+
     if (!GetIconInfo(cursor, &icon_info))
     {
-        PLOG(ERROR) << "GetIconInfo failed";
+        if (!failure_reported)
+        {
+            PLOG(ERROR) << "GetIconInfo failed (repeats are not logged until it recovers)";
+            failure_reported = true;
+        }
         return nullptr;
+    }
+
+    if (failure_reported)
+    {
+        LOG(INFO) << "GetIconInfo recovered";
+        failure_reported = false;
     }
 
     // Make sure the bitmaps will be freed.

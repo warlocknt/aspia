@@ -45,11 +45,17 @@ namespace {
 bool waitForValidInputDesktop()
 {
 #if defined(Q_OS_WINDOWS)
-    int max_attempt_count = 600;
+    const int kMaxAttemptCount = 600;
+    int max_attempt_count = kMaxAttemptCount;
+
+    // Every failed attempt is expected while the secure desktop is up - this process simply has
+    // no access to it. Logging each of the ten-per-second attempts produced over a hundred
+    // identical error lines per lock, so the attempts are silent and only the outcome is logged.
+    LOG(INFO) << "Waiting for an accessible input desktop";
 
     do
     {
-        base::Desktop input_desktop(base::Desktop::inputDesktop());
+        base::Desktop input_desktop(base::Desktop::inputDesktop(false));
         if (input_desktop.isValid())
         {
             if (input_desktop.setThreadDesktop())
@@ -57,7 +63,8 @@ bool waitForValidInputDesktop()
                 wchar_t desktop_name[100] = { 0 };
                 if (input_desktop.name(desktop_name, sizeof(desktop_name)))
                 {
-                    LOG(INFO) << "Attached to desktop:" << desktop_name;
+                    LOG(INFO) << "Attached to desktop:" << desktop_name << "after"
+                              << (kMaxAttemptCount - max_attempt_count) << "attempts";
                 }
                 break;
             }

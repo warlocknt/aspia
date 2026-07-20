@@ -76,6 +76,10 @@ private:
     CURSORINFO curr_cursor_info_;
     CURSORINFO prev_cursor_info_;
 
+    // GetCursorInfo fails persistently on the secure desktop; captureCursor runs per frame, so
+    // only the start of a failure streak and the recovery are logged.
+    bool cursor_info_failure_reported_ = false;
+
     Q_DISABLE_COPY(ScreenCapturerGdi)
 };
 
