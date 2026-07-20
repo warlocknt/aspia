@@ -68,9 +68,20 @@ private slots:
     void onTaskDone(const common::FileTask& task);
 
 private:
-    void doNextRemoteTask();
+    void pumpRemoteTasks();
 
     common::FileTaskFactory* taskFactory(common::FileTask::Target target);
+
+    // How many queued requests may be on the wire at once. One at a time made every packet cost
+    // a full network round trip, which capped transfers at packet_size / RTT regardless of
+    // bandwidth. The host processes messages in order and TCP preserves it, so replies still
+    // match requests by queue position. Sized above the producer's packet window so this layer
+    // is never the constraint.
+    static constexpr int kMaxInFlightRemoteTasks = 12;
+
+    // The first |remote_tasks_in_flight_| entries of |remote_task_queue_| have been sent and
+    // await replies; the rest have not been sent yet.
+    int remote_tasks_in_flight_ = 0;
 
     QPointer<common::FileTaskFactory> local_task_factory_;
     QPointer<common::FileTaskFactory> remote_task_factory_;

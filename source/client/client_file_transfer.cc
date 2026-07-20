@@ -63,12 +63,16 @@ void ClientFileTransfer::onSessionMessageReceived(const QByteArray& buffer)
     {
         // Replies are matched to requests by their order in the queue, so an unreadable reply
         // leaves the queue with a request that will never be answered. Nothing else drains the
-        // queue, and doNextRemoteTask() only runs when a reply arrives, so every later operation
+        // queue, and the queue is only drained by replies, so every later operation
         // would be silently queued forever. Report the failure instead of stalling.
         LOG(ERROR) << "Invalid message from host";
 
         if (!remote_task_queue_.isEmpty())
+        {
             remote_task_queue_.pop_front();
+            if (remote_tasks_in_flight_ > 0)
+                --remote_tasks_in_flight_;
+        }
 
         emit sig_errorOccurred(proto::file_transfer::ERROR_CODE_UNKNOWN);
         return;
@@ -82,14 +86,19 @@ void ClientFileTransfer::onSessionMessageReceived(const QByteArray& buffer)
     }
     else if (!remote_task_queue_.isEmpty())
     {
-        // Move the reply to the request and notify the sender.
-        remote_task_queue_.front().onReply(std::move(reply));
-
-        // Remove the request from the queue.
+        // Remove the request from the queue BEFORE delivering the reply. Delivering it can
+        // synchronously enqueue follow-up tasks, and those must land behind the requests that
+        // are already on the wire, with the bookkeeping already consistent.
+        common::FileTask task = remote_task_queue_.front();
         remote_task_queue_.pop_front();
+        if (remote_tasks_in_flight_ > 0)
+            --remote_tasks_in_flight_;
 
-        // Execute the next request.
-        doNextRemoteTask();
+        // Move the reply to the request and notify the sender.
+        task.onReply(std::move(reply));
+
+        // Send more requests if the window has room.
+        pumpRemoteTasks();
     }
     else
     {
@@ -140,14 +149,11 @@ void ClientFileTransfer::onTask(const common::FileTask& task)
     }
     else
     {
-        const bool schedule = remote_task_queue_.isEmpty();
-
         // Add the request to the queue.
         remote_task_queue_.push_back(task);
 
-        // If the request queue was empty, then run execution.
-        if (schedule)
-            doNextRemoteTask();
+        // Send it right away if the window has room.
+        pumpRemoteTasks();
     }
 }
 
@@ -202,13 +208,17 @@ void ClientFileTransfer::onTransferRequest(FileTransfer* transfer)
 }
 
 //--------------------------------------------------------------------------------------------------
-void ClientFileTransfer::doNextRemoteTask()
+void ClientFileTransfer::pumpRemoteTasks()
 {
-    if (remote_task_queue_.isEmpty())
-        return;
-
-    // Send a request to the remote computer.
-    sendMessage(serializer_.serialize(remote_task_queue_.front().request()));
+    // Everything before |remote_tasks_in_flight_| is already on the wire. Send what follows
+    // until the window is full or the queue runs out.
+    while (remote_tasks_in_flight_ < remote_task_queue_.size() &&
+           remote_tasks_in_flight_ < kMaxInFlightRemoteTasks)
+    {
+        sendMessage(serializer_.serialize(
+            remote_task_queue_.at(remote_tasks_in_flight_).request()));
+        ++remote_tasks_in_flight_;
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
