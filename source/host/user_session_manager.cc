@@ -230,6 +230,13 @@ bool UserSessionManager::start()
 }
 
 //--------------------------------------------------------------------------------------------------
+void UserSessionManager::disconnectAllClients()
+{
+    for (const auto& session : std::as_const(sessions_))
+        session->disconnectClients();
+}
+
+//--------------------------------------------------------------------------------------------------
 void UserSessionManager::onUserSessionEvent(base::SessionStatus status, base::SessionId session_id)
 {
     QString status_str;

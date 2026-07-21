@@ -42,6 +42,13 @@ public:
     ~Server() final;
 
     void start();
+
+    // Disconnects all connected clients right away, before the server is torn down. Called when
+    // the service is stopping so the far end sees the disconnect at once instead of waiting out
+    // the keep-alive timeout. Kept separate from the destructor so it runs while the event loop
+    // and the network are still up.
+    void stop();
+
     void setSessionEvent(base::SessionStatus status, base::SessionId session_id);
     void setPowerEvent(quint32 power_event);
 

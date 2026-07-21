@@ -51,6 +51,12 @@ public:
     void start();
     void stop();
 
+    // Closes the network channel immediately, sending a FIN to the client. Called when the service
+    // is stopping so the client learns of the disconnect at once, instead of waiting out the
+    // keep-alive timeout (up to 90 s of a frozen screen). stop() only marks the session finished;
+    // this actually tears the socket down.
+    void disconnectChannel();
+
     State state() const { return state_; }
     quint32 id() const { return id_; }
 

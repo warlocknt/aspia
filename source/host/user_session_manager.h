@@ -38,6 +38,11 @@ public:
     ~UserSessionManager() final;
 
     bool start();
+
+    // Disconnects the network channels of every client across all sessions. Called when the
+    // service is stopping so clients are notified at once rather than after the keep-alive timeout.
+    void disconnectAllClients();
+
     void onUserSessionEvent(base::SessionStatus status, base::SessionId session_id);
     void onRouterStateChanged(const proto::internal::RouterState& router_state);
     void onUpdateCredentials(base::HostId host_id, const QString& password);

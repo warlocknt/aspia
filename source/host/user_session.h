@@ -61,6 +61,10 @@ public:
     void start();
     void restart(base::IpcChannel* channel);
 
+    // Closes the network channel of every client of this session (confirmed and still pending), so
+    // the far end is notified at once when the service stops.
+    void disconnectClients();
+
     Type type() const { return type_; }
     State state() const { return state_; }
     base::SessionId sessionId() const { return session_id_; }

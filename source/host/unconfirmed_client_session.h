@@ -35,6 +35,9 @@ public:
 
     void setTimeout(const std::chrono::milliseconds& timeout);
 
+    // Closes the wrapped client's channel (used when the service is stopping).
+    void disconnectChannel();
+
     ClientSession* takeClientSession();
     quint32 id() const;
 

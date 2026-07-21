@@ -132,6 +132,12 @@ void Service::onStart()
 void Service::onStop()
 {
     LOG(INFO) << "Service stopping...";
+
+    // Notify clients before tearing anything down, so they disconnect at once rather than after
+    // the keep-alive timeout. Done here, while the event loop still runs, not in the destructor.
+    if (server_)
+        server_->stop();
+
     delete server_;
     LOG(INFO) << "Service is stopped";
 }

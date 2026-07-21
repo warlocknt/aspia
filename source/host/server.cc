@@ -124,6 +124,18 @@ void Server::start()
 }
 
 //--------------------------------------------------------------------------------------------------
+void Server::stop()
+{
+    LOG(INFO) << "Disconnecting all clients before stop";
+
+    // Closing the channels here - while the event loop and the network stack are still up - sends
+    // a FIN to every client immediately. Left to the destructor cascade alone, a client could sit
+    // on a frozen screen until its keep-alive timed out (up to 90 s).
+    if (user_session_manager_)
+        user_session_manager_->disconnectAllClients();
+}
+
+//--------------------------------------------------------------------------------------------------
 void Server::setSessionEvent(base::SessionStatus status, base::SessionId session_id)
 {
     LOG(INFO) << "Session event (status:" << static_cast<int>(status)

@@ -30,6 +30,13 @@ const std::chrono::seconds kRejectInterval { 60 };
 } // namespace
 
 //--------------------------------------------------------------------------------------------------
+void UnconfirmedClientSession::disconnectChannel()
+{
+    if (client_session_)
+        client_session_->disconnectChannel();
+}
+
+//--------------------------------------------------------------------------------------------------
 UnconfirmedClientSession::UnconfirmedClientSession(ClientSession* client_session, QObject* parent)
     : QObject(parent),
       client_session_(client_session),

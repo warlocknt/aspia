@@ -167,6 +167,16 @@ void UserSession::restart(base::IpcChannel* channel)
 }
 
 //--------------------------------------------------------------------------------------------------
+void UserSession::disconnectClients()
+{
+    for (const auto& client : std::as_const(clients_))
+        client->disconnectChannel();
+
+    for (const auto& pending : std::as_const(pending_clients_))
+        pending->disconnectChannel();
+}
+
+//--------------------------------------------------------------------------------------------------
 void UserSession::onClientSession(ClientSession* client_session)
 {
     DCHECK(client_session);

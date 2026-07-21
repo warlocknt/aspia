@@ -109,6 +109,20 @@ void ClientSession::stop()
 }
 
 //--------------------------------------------------------------------------------------------------
+void ClientSession::disconnectChannel()
+{
+    // TcpChannel deliberately hides its disconnect: the supported way to close a connection is to
+    // destroy the channel, whose destructor closes the socket and sends a FIN. It is a child of
+    // this session, so deleting it here also removes it from the child list; null the pointer so
+    // nothing touches it afterwards. Destruction of the session later becomes a no-op for it.
+    if (tcp_channel_)
+    {
+        delete tcp_channel_;
+        tcp_channel_ = nullptr;
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
 void ClientSession::setClientVersion(const QVersionNumber& version)
 {
     version_ = version;
