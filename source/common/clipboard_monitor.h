@@ -37,6 +37,10 @@ public:
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
     void clearClipboard();
 
+    // A tear-free copy of the per-type tallies for the statistics view. Safe to call from another
+    // thread: the counters are atomic and their storage outlives the clipboard object.
+    ClipboardStats::Snapshot statsSnapshot() const { return stats_->snapshot(); }
+
 signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
     void sig_injectClipboardEventPrivate(const proto::desktop::ClipboardEvent& event);
@@ -49,6 +53,11 @@ private slots:
 private:
     base::Thread thread_;
     std::unique_ptr<common::Clipboard> clipboard_;
+
+    // Owned here rather than by the clipboard so that the statistics view can read it from the UI
+    // thread while the clipboard, on its own thread, keeps writing - and so it survives the
+    // clipboard being torn down at session end.
+    std::shared_ptr<ClipboardStats> stats_ = std::make_shared<ClipboardStats>();
 
     Q_DISABLE_COPY(ClipboardMonitor)
 };

@@ -29,6 +29,7 @@
 #include <QDataStream>
 #include <QImage>
 #include <QStringList>
+#include <QTextDocumentFragment>
 
 namespace common {
 
@@ -91,13 +92,13 @@ QString standardFormatName(UINT format)
 }
 
 //--------------------------------------------------------------------------------------------------
-// Names of every format currently on the clipboard, as one comma-separated string. The clipboard
-// must already be open: EnumClipboardFormats() requires it, unlike IsClipboardFormatAvailable().
+// Names of every format currently on the clipboard. The clipboard must already be open:
+// EnumClipboardFormats() requires it, unlike IsClipboardFormatAvailable().
 //
 // Only the names are collected, never the contents. Clipboards routinely carry passwords and other
 // secrets, and logs get gathered up and shipped elsewhere for analysis, so nothing that passes
 // through here may end up in one.
-QString availableFormats()
+QStringList availableFormatList()
 {
     QStringList formats;
 
@@ -112,7 +113,131 @@ QString availableFormats()
             formats << standardFormatName(format);
     }
 
-    return formats.join(QStringLiteral(", "));
+    return formats;
+}
+
+//--------------------------------------------------------------------------------------------------
+// The same, as one comma-separated string.
+QString availableFormats()
+{
+    return availableFormatList().join(QStringLiteral(", "));
+}
+
+//--------------------------------------------------------------------------------------------------
+// Extracts the fragment from a Windows "HTML Format" buffer. That buffer is a short ASCII header of
+// "Key:offset" lines followed by the HTML, where the offsets are byte positions from the start.
+// The fragment is what the user actually selected, marked by StartFragment/EndFragment; the rest is
+// the surrounding <html><body> Windows adds. Returns UTF-8 (the format is already UTF-8).
+QByteArray htmlFormatToFragment(const QByteArray& cf_html)
+{
+    auto readOffset = [&cf_html](const char* key) -> int
+    {
+        int index = cf_html.indexOf(key);
+        if (index < 0)
+            return -1;
+
+        index += static_cast<int>(strlen(key));
+
+        int end = index;
+        while (end < cf_html.size() && cf_html[end] >= '0' && cf_html[end] <= '9')
+            ++end;
+
+        if (end == index)
+            return -1;
+
+        return cf_html.mid(index, end - index).toInt();
+    };
+
+    const int start_fragment = readOffset("StartFragment:");
+    const int end_fragment = readOffset("EndFragment:");
+    if (start_fragment >= 0 && end_fragment >= start_fragment && end_fragment <= cf_html.size())
+        return cf_html.mid(start_fragment, end_fragment - start_fragment);
+
+    // Offsets were missing or nonsensical: fall back to the literal comment markers.
+    int start = cf_html.indexOf("<!--StartFragment-->");
+    const int end = cf_html.indexOf("<!--EndFragment-->");
+    if (start >= 0 && end > start)
+    {
+        start += static_cast<int>(strlen("<!--StartFragment-->"));
+        return cf_html.mid(start, end - start);
+    }
+
+    // Last resort: the whole document body between StartHTML and EndHTML.
+    const int start_html = readOffset("StartHTML:");
+    const int end_html = readOffset("EndHTML:");
+    if (start_html >= 0 && end_html >= start_html && end_html <= cf_html.size())
+        return cf_html.mid(start_html, end_html - start_html);
+
+    return QByteArray();
+}
+
+//--------------------------------------------------------------------------------------------------
+// Wraps a UTF-8 HTML fragment in the "HTML Format" header Windows requires, with the byte offsets
+// filled in. The numbers are written as fixed-width placeholders first and then patched, so the
+// offsets do not depend on how many digits they take.
+QByteArray fragmentToHtmlFormat(const QByteArray& fragment)
+{
+    const QByteArray prefix = "<html>\r\n<body>\r\n<!--StartFragment-->";
+    const QByteArray suffix = "<!--EndFragment-->\r\n</body>\r\n</html>";
+
+    QByteArray buffer =
+        "Version:0.9\r\n"
+        "StartHTML:0000000000\r\n"
+        "EndHTML:0000000000\r\n"
+        "StartFragment:0000000000\r\n"
+        "EndFragment:0000000000\r\n";
+
+    const int header_size = buffer.size();
+    buffer += prefix;
+    const int start_fragment = buffer.size();
+    buffer += fragment;
+    const int end_fragment = buffer.size();
+    buffer += suffix;
+    const int end_html = buffer.size();
+
+    auto patch = [&buffer](const char* key, int value)
+    {
+        int index = buffer.indexOf(key);
+        if (index < 0)
+            return;
+        index += static_cast<int>(strlen(key));
+        const QByteArray number = QByteArray::number(value).rightJustified(10, '0');
+        memcpy(buffer.data() + index, number.constData(), 10);
+    };
+
+    patch("StartHTML:", header_size);
+    patch("EndHTML:", end_html);
+    patch("StartFragment:", start_fragment);
+    patch("EndFragment:", end_fragment);
+
+    return buffer;
+}
+
+//--------------------------------------------------------------------------------------------------
+// Copies |bytes| into a moveable global and hands it to the clipboard, which takes ownership. The
+// clipboard must already be open and emptied. Returns false and frees on any failure.
+bool putClipboardData(base::ScopedClipboard& clipboard, UINT format, const void* bytes, size_t size)
+{
+    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE, size);
+    if (!global)
+    {
+        PLOG(ERROR) << "GlobalAlloc failed";
+        return false;
+    }
+
+    void* locked = GlobalLock(global);
+    if (!locked)
+    {
+        PLOG(ERROR) << "GlobalLock failed";
+        GlobalFree(global);
+        return false;
+    }
+
+    memcpy(locked, bytes, size);
+    GlobalUnlock(global);
+
+    clipboard.setData(format, global);
+    return true;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -123,24 +248,6 @@ bool hasOtherContent()
     return IsClipboardFormatAvailable(CF_DIB) ||
            IsClipboardFormatAvailable(CF_BITMAP) ||
            IsClipboardFormatAvailable(CF_HDROP);
-}
-
-//--------------------------------------------------------------------------------------------------
-// Records what the clipboard holds whenever it changes to something this class cannot pass on, so
-// that the formats worth implementing can be chosen from what actually turns up on working machines
-// rather than from guesswork.
-void logUnsupportedFormats(HWND owner)
-{
-    base::ScopedClipboard clipboard;
-    if (!clipboard.init(owner))
-        return;
-
-    const QString formats = availableFormats();
-    if (formats.isEmpty())
-        return;
-
-    LOG(INFO) << "Clipboard changed to content that is not supported. Available formats:"
-              << formats;
 }
 
 } // namespace
@@ -176,6 +283,12 @@ void ClipboardWin::init()
         return;
     }
 
+    // Windows carries formatted text under a registered format named "HTML Format". Resolving its
+    // id once here; if it fails, HTML is simply never offered and plain text is used throughout.
+    html_format_ = RegisterClipboardFormatW(L"HTML Format");
+    if (!html_format_)
+        PLOG(ERROR) << "RegisterClipboardFormat(HTML Format) failed";
+
     window_ = std::make_unique<base::MessageWindow>();
 
     if (!window_->create(std::bind(&ClipboardWin::onMessage,
@@ -207,6 +320,10 @@ void ClipboardWin::setData(const QString& mime_type, const QByteArray& data)
     {
         setDataText(data);
     }
+    else if (mime_type == Clipboard::kMimeTypeTextHtml)
+    {
+        setDataHtml(data);
+    }
     else if (mime_type == Clipboard::kMimeTypeImagePng)
     {
         setDataImage(data);
@@ -214,6 +331,48 @@ void ClipboardWin::setData(const QString& mime_type, const QByteArray& data)
     else
     {
         LOG(ERROR) << "Unsupported mime type:" << mime_type;
+    }
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::setDataHtml(const QByteArray& data)
+{
+    if (!html_format_)
+    {
+        // Could not register the format at startup; fall back to plain text so the copy still lands.
+        LOG(WARNING) << "HTML format unavailable, applying as plain text";
+        setDataText(data);
+        return;
+    }
+
+    const QByteArray cf_html = fragmentToHtmlFormat(data);
+
+    // A plain-text rendering placed next to the HTML, so applications that read only CF_UNICODETEXT
+    // (Notepad, a terminal) still receive the text instead of nothing. Derived locally from the
+    // fragment here, independent of the text_fallback the sender carries for the network boundary.
+    QString plain = QTextDocumentFragment::fromHtml(QString::fromUtf8(data)).toPlainText();
+    plain.replace(QLatin1String("\n"), QLatin1String("\r\n"));
+
+    base::ScopedClipboard clipboard;
+    if (!clipboard.init(window_->hwnd()))
+    {
+        PLOG(ERROR) << "Couldn't open the clipboard";
+        return;
+    }
+
+    clipboard.empty();
+
+    // The HTML Format buffer is UTF-8 and conventionally NUL-terminated.
+    QByteArray cf_html_z = cf_html;
+    cf_html_z.append('\0');
+    putClipboardData(clipboard, html_format_, cf_html_z.constData(),
+                     static_cast<size_t>(cf_html_z.size()));
+
+    if (!plain.isEmpty())
+    {
+        const std::wstring text = plain.toStdWString();
+        putClipboardData(clipboard, CF_UNICODETEXT, text.c_str(),
+                         (text.size() + 1) * sizeof(wchar_t));
     }
 }
 
@@ -346,9 +505,20 @@ bool ClipboardWin::onMessage(UINT message, WPARAM /* wParam */, LPARAM /* lParam
 //--------------------------------------------------------------------------------------------------
 void ClipboardWin::onClipboardUpdate()
 {
-    // Text wins when both are present. Applications that put a picture on the clipboard usually
-    // offer text next to it, and that text is normally the content the user meant to copy - the
-    // picture is a rendering of it. Copying a range out of a spreadsheet is the everyday example.
+    // Formatted text wins when present: HTML carries the formatting the user copied, and a plain
+    // text rendering rides along in the same event so a peer that cannot take HTML is downgraded to
+    // text at the network boundary rather than here - this side stays peer-agnostic. A hiccup
+    // reading the HTML falls through to plain text below, so a copy is never lost to it.
+    if (html_format_ && IsClipboardFormatAvailable(html_format_))
+    {
+        if (onClipboardHtml())
+            return;
+    }
+
+    // Text wins over an image when both are present. Applications that put a picture on the
+    // clipboard usually offer text next to it, and that text is normally the content the user meant
+    // to copy - the picture is a rendering of it. Copying a range out of a spreadsheet is the
+    // everyday example.
     if (IsClipboardFormatAvailable(CF_UNICODETEXT))
     {
         onClipboardText();
@@ -363,7 +533,7 @@ void ClipboardWin::onClipboardUpdate()
         return;
     }
 
-    logUnsupportedFormats(window_->hwnd());
+    recordUnsupported();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -408,6 +578,7 @@ void ClipboardWin::onClipboardText()
         {
             LOG(INFO) << "Clipboard text taken, other content dropped. Available formats:"
                       << availableFormats();
+            countDegradedOut();
         }
     }
 
@@ -416,6 +587,130 @@ void ClipboardWin::onClipboardText()
         data.replace("\r\n", "\n");
         onData(Clipboard::kMimeTypeTextUtf8, data.toUtf8());
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+bool ClipboardWin::onClipboardHtml()
+{
+    QByteArray cf_html;
+
+    // Add a scope, so that we keep the clipboard open for as short a time as possible.
+    {
+        base::ScopedClipboard clipboard;
+
+        if (!clipboard.init(window_->hwnd()))
+        {
+            PLOG(ERROR) << "Couldn't open the clipboard";
+            return false;
+        }
+
+        HGLOBAL html_global = clipboard.data(html_format_);
+        if (!html_global)
+            return false;
+
+        base::ScopedHGLOBAL<char> html_lock(html_global);
+        if (!html_lock.get())
+        {
+            PLOG(ERROR) << "Couldn't lock clipboard HTML";
+            return false;
+        }
+
+        const SIZE_T html_size = GlobalSize(html_global);
+        if (html_size > static_cast<SIZE_T>(std::numeric_limits<int>::max()))
+        {
+            LOG(ERROR) << "Clipboard HTML is implausibly large:" << html_size << "bytes";
+            return false;
+        }
+
+        // The buffer is conventionally NUL-terminated; take only up to the terminator so the header
+        // offsets and the fragment are not thrown off by trailing padding.
+        int length = static_cast<int>(html_size);
+        const char* bytes = html_lock.get();
+        int terminator = 0;
+        while (terminator < length && bytes[terminator] != '\0')
+            ++terminator;
+        length = terminator;
+
+        cf_html = QByteArray(bytes, length);
+    }
+
+    const QByteArray fragment = htmlFormatToFragment(cf_html);
+    if (fragment.isEmpty())
+    {
+        // The header could not be parsed. Let the caller fall back to plain text rather than send
+        // an empty or malformed fragment.
+        LOG(WARNING) << "Couldn't extract fragment from clipboard HTML of" << cf_html.size()
+                     << "bytes";
+        return false;
+    }
+
+    // A plain-text rendering rides along so the network boundary can downgrade this event to text
+    // for a peer that has not negotiated HTML. Prefer the clipboard's own CF_UNICODETEXT (what the
+    // source application chose) and fall back to stripping the fragment.
+    QByteArray text_fallback;
+    if (IsClipboardFormatAvailable(CF_UNICODETEXT))
+    {
+        base::ScopedClipboard clipboard;
+        if (clipboard.init(window_->hwnd()))
+        {
+            HGLOBAL text_global = clipboard.data(CF_UNICODETEXT);
+            if (text_global)
+            {
+                base::ScopedHGLOBAL<wchar_t> text_lock(text_global);
+                if (text_lock.get())
+                {
+                    QString text = QString::fromWCharArray(text_lock.get());
+                    text.replace("\r\n", "\n");
+                    text_fallback = text.toUtf8();
+                }
+            }
+        }
+    }
+
+    if (text_fallback.isEmpty())
+    {
+        const QString plain =
+            QTextDocumentFragment::fromHtml(QString::fromUtf8(fragment)).toPlainText();
+        text_fallback = plain.toUtf8();
+    }
+
+    onData(Clipboard::kMimeTypeTextHtml, fragment, text_fallback);
+    return true;
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::recordUnsupported()
+{
+    base::ScopedClipboard clipboard;
+    if (!clipboard.init(window_->hwnd()))
+        return;
+
+    const QStringList formats = availableFormatList();
+    if (formats.isEmpty())
+        return;
+
+    // Recorded so the formats worth implementing can be chosen from what actually turns up on
+    // working machines rather than from guesswork. Names only, never content.
+    LOG(INFO) << "Clipboard changed to content that is not supported. Available formats:"
+              << formats.join(QStringLiteral(", "));
+
+    for (const QString& format : formats)
+        ++unsupported_seen_[format];
+
+    countUnsupportedOut();
+}
+
+//--------------------------------------------------------------------------------------------------
+QString ClipboardWin::unsupportedFormatsSummary() const
+{
+    if (unsupported_seen_.isEmpty())
+        return QString();
+
+    QStringList parts;
+    for (auto it = unsupported_seen_.constBegin(); it != unsupported_seen_.constEnd(); ++it)
+        parts << QStringLiteral("%1 x%2").arg(it.key()).arg(it.value());
+
+    return parts.join(QStringLiteral(", "));
 }
 
 //--------------------------------------------------------------------------------------------------

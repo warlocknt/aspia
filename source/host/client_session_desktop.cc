@@ -493,6 +493,21 @@ void ClientSessionDesktop::injectClipboardEvent(const proto::desktop::ClipboardE
             return;
         }
 
+        // A client that has not announced HTML support cannot read a formatted event, but the plain
+        // text rides along in it: downgrade to text here rather than dropping the copy.
+        if (event.mime_type() == common::Clipboard::kMimeTypeTextHtml.toStdString() &&
+            !client_supports_clipboard_html_)
+        {
+            proto::desktop::ClipboardEvent text_event;
+            text_event.set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
+            text_event.set_data(event.text_fallback());
+
+            outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(text_event);
+            sendMessage(outgoing_message_.serialize());
+            stat_counter_.addOutgoingClipboardEvent();
+            return;
+        }
+
         outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
         sendMessage(outgoing_message_.serialize());
         stat_counter_.addOutgoingClipboardEvent();
@@ -532,6 +547,13 @@ void ClientSessionDesktop::readExtension(const proto::desktop::Extension& extens
         // clients never send it - and without it we do not forward images to them.
         LOG(INFO) << "Client supports clipboard images";
         client_supports_clipboard_image_ = true;
+    }
+    else if (extension.name() == common::kClipboardHtmlExtension)
+    {
+        // As with images: announced only after the client has seen it in our capabilities, so an
+        // old client never sends it and is downgraded to plain text.
+        LOG(INFO) << "Client supports clipboard HTML";
+        client_supports_clipboard_html_ = true;
     }
     else if (extension.name() == common::kPowerControlExtension)
     {

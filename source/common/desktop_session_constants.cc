@@ -39,10 +39,15 @@ const char kScreenTypeExtension[] = "screen_type";
 // the client by echoing this extension back once it sees the host has it.
 const char kClipboardImageExtension[] = "clipboard_image";
 
+// Formatted (HTML) clipboard content appeared in this fork after 2.8.1. As with images, a peer that
+// does not list this extension is never sent an HTML event: it is sent the plain text instead, so
+// nothing is lost, only the formatting. Each side prefers HTML only once the other has declared it.
+const char kClipboardHtmlExtension[] = "clipboard_html";
+
 #if defined(Q_OS_WINDOWS)
 const char kSupportedExtensionsForManage[] =
     "select_screen;preferred_size;power_control;remote_update;system_info;video_recording;"
-    "task_manager;video_pause;audio_pause;screen_type;clipboard_image";
+    "task_manager;video_pause;audio_pause;screen_type;clipboard_image;clipboard_html";
 
 const char kSupportedExtensionsForView[] =
     "select_screen;preferred_size;system_info;video_recording;video_pause;audio_pause;screen_type";

@@ -21,6 +21,8 @@
 
 #include <qt_windows.h>
 
+#include <QHash>
+
 #include "common/clipboard.h"
 
 namespace base {
@@ -41,6 +43,7 @@ protected:
     // Clipboard implementation.
     void init() final;
     void setData(const QString& mime_type, const QByteArray& data) final;
+    QString unsupportedFormatsSummary() const final;
 
 private:
     void onClipboardUpdate();
@@ -49,18 +52,35 @@ private:
     // by the caller, which has no reason to know that.
     void setDataText(const QByteArray& data);
 
+    // |data| is a UTF-8 HTML fragment. Windows carries HTML under a registered format wrapped in
+    // its own "CF_HTML" header; that header is built here, and a plain-text version is placed
+    // alongside so applications that read only plain text still get something.
+    void setDataHtml(const QByteArray& data);
+
     // |data| is a PNG. Windows has no notion of that on the clipboard, so it is converted to a
     // device independent bitmap, which every Windows application understands.
     void setDataImage(const QByteArray& data);
 
     void onClipboardText();
+    bool onClipboardHtml();
     void onClipboardImage();
+
+    // Records, by format name, what turned up on the clipboard but could not be carried, so the
+    // end-of-session summary can report it. Counts only, never content.
+    void recordUnsupported();
 
     // Handles messages received by |window_|.
     bool onMessage(UINT message, WPARAM wParam, LPARAM lParam, LRESULT& result);
 
     // Used to subscribe to WM_CLIPBOARDUPDATE messages.
     std::unique_ptr<base::MessageWindow> window_;
+
+    // The registered clipboard format id for "HTML Format". Resolved once; zero if it could not be
+    // registered, in which case HTML is simply not offered.
+    UINT html_format_ = 0;
+
+    // How often each unsupported format name was seen this session, for the teardown summary.
+    QHash<QString, int> unsupported_seen_;
 
     Q_DISABLE_COPY(ClipboardWin)
 };

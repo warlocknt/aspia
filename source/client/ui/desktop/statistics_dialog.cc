@@ -194,8 +194,58 @@ void StatisticsDialog::setMetrics(const ClientDesktop::Metrics& metrics)
             case 26:
                 item->setText(1, QString::number(metrics.cursor_pos_count));
                 break;
+
+            case 27:
+                updateClipboardItem(item, metrics.clipboard);
+                break;
         }
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+void StatisticsDialog::updateClipboardItem(QTreeWidgetItem* parent,
+                                           const common::ClipboardStats::Snapshot& clipboard)
+{
+    // The child rows are created once and then only their text is updated, so expanding the node
+    // and the selection survive the once-a-second refresh. Rows with nothing to show are hidden
+    // rather than removed, for the same reason. The order here is fixed and matched by index below.
+    if (parent->childCount() == 0)
+    {
+        for (int i = 0; i < 7; ++i)
+            new QTreeWidgetItem(parent);
+        parent->setExpanded(true);
+    }
+
+    auto setRow = [parent](int index, const QString& name, const QString& value, bool visible)
+    {
+        QTreeWidgetItem* row = parent->child(index);
+        row->setText(0, name);
+        row->setText(1, value);
+        row->setHidden(!visible);
+    };
+
+    auto sentReceived = [](int sent, int received)
+    {
+        return QString("%1 / %2").arg(sent).arg(received);
+    };
+
+    setRow(0, tr("Text (sent/received)"),
+           sentReceived(clipboard.text_sent, clipboard.text_received),
+           clipboard.text_sent || clipboard.text_received);
+    setRow(1, tr("HTML (sent/received)"),
+           sentReceived(clipboard.html_sent, clipboard.html_received),
+           clipboard.html_sent || clipboard.html_received);
+    setRow(2, tr("Image (sent/received)"),
+           sentReceived(clipboard.image_sent, clipboard.image_received),
+           clipboard.image_sent || clipboard.image_received);
+    setRow(3, tr("Dropped (unsupported)"),
+           QString::number(clipboard.unsupported_out), clipboard.unsupported_out != 0);
+    setRow(4, tr("Dropped (text only)"),
+           QString::number(clipboard.degraded_out), clipboard.degraded_out != 0);
+    setRow(5, tr("Received unsupported"),
+           QString::number(clipboard.unsupported_in), clipboard.unsupported_in != 0);
+    setRow(6, tr("Too large"),
+           QString::number(clipboard.oversized), clipboard.oversized != 0);
 }
 
 //--------------------------------------------------------------------------------------------------

@@ -43,6 +43,11 @@ private:
     static QString sizeToString(qint64 size);
     static QString speedToString(qint64 speed);
 
+    // Fills the expandable "Clipboard" node with a per-type breakdown, creating its child rows on
+    // first use and only updating their text afterwards so the node's expanded state survives.
+    void updateClipboardItem(QTreeWidgetItem* parent,
+                             const common::ClipboardStats::Snapshot& clipboard);
+
     Ui::StatisticsDialog ui;
     QTimer* update_timer_ = nullptr;
     QTime duration_;

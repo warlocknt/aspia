@@ -96,6 +96,8 @@ void ClipboardMonitor::onBeforeThreadRunning()
 #error Not implemented
 #endif
 
+    clipboard_->setStats(stats_);
+
     connect(clipboard_.get(), &Clipboard::sig_clipboardEvent,
             this, &ClipboardMonitor::sig_clipboardEvent,
             Qt::QueuedConnection);
@@ -115,6 +117,12 @@ void ClipboardMonitor::onBeforeThreadRunning()
 void ClipboardMonitor::onAfterThreadRunning()
 {
     LOG(INFO) << "Thread stopping";
+
+    // While the clipboard is still fully alive: dispatches to the platform override for the
+    // format detail, which the base destructor's static type would hide.
+    if (clipboard_)
+        clipboard_->logSessionSummary();
+
     clipboard_.reset();
 }
 

@@ -151,6 +151,12 @@ message ClipboardEvent
 {
     string mime_type = 1;
     bytes data = 2;
+
+    // A plain-text rendering of the content, carried only when |data| is formatted (mime_type
+    // text/html). A peer that has not negotiated the clipboard_html extension is downgraded at the
+    // network boundary by replacing the event with this text, so nothing is lost - only the
+    // formatting. Endpoints that accept HTML ignore this and derive their own plain text on paste.
+    bytes text_fallback = 3;
 }
 
 message CursorShape

@@ -84,6 +84,10 @@ public:
         int cursor_pos_count = 0;
         int cursor_cached = 0;
         int cursor_taken_from_cache = 0;
+
+        // Per-type clipboard tally for the session. Sent/received are counts of successful events
+        // by format; the rest are what could not be carried. Content never appears here.
+        common::ClipboardStats::Snapshot clipboard { };
     };
 
 public slots:
@@ -140,6 +144,10 @@ private:
     // drop image/png clipboard events, so images are only sent once the host has said it takes
     // them; text keeps flowing either way.
     bool host_supports_clipboard_image_ = false;
+
+    // Whether the host declared the clipboard_html extension. A host without it is sent the plain
+    // text carried alongside a formatted event instead of the HTML.
+    bool host_supports_clipboard_html_ = false;
 
     std::shared_ptr<base::Frame> desktop_frame_;
     proto::desktop::Config desktop_config_;

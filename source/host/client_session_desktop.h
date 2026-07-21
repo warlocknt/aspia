@@ -132,6 +132,10 @@ private:
     // are not forwarded to this client - it would drop them silently anyway.
     bool client_supports_clipboard_image_ = false;
 
+    // Set when the client announces the clipboard_html extension. Without it a formatted clipboard
+    // event is downgraded to the plain text carried alongside it before being sent.
+    bool client_supports_clipboard_html_ = false;
+
     QPointer<QTimer> overflow_detection_timer_;
     size_t write_overflow_count_ = 0;
     size_t write_normal_count_ = 1;

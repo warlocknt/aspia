@@ -155,6 +155,20 @@ void ClientDesktop::onClipboardEvent(const proto::desktop::ClipboardEvent& event
         return;
     }
 
+    // A host that cannot take HTML still gets the copy: downgrade the event to the plain text
+    // carried alongside it rather than dropping the formatting and the content both.
+    if (event.mime_type() == common::Clipboard::kMimeTypeTextHtml.toStdString() &&
+        !host_supports_clipboard_html_)
+    {
+        proto::desktop::ClipboardEvent text_event;
+        text_event.set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
+        text_event.set_data(event.text_fallback());
+
+        outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(text_event);
+        sendMessage(outgoing_message_.serialize());
+        return;
+    }
+
     outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
     sendMessage(outgoing_message_.serialize());
 }
@@ -462,6 +476,9 @@ void ClientDesktop::onMetricsRequest()
         metrics.cursor_taken_from_cache = cursor_decoder_->takenCursorsFromCache();
     }
 
+    if (clipboard_monitor_)
+        metrics.clipboard = clipboard_monitor_->statsSnapshot();
+
     emit sig_metrics(metrics);
 }
 
@@ -484,6 +501,20 @@ void ClientDesktop::readCapabilities(const proto::desktop::Capabilities& capabil
         // only when the host has declared the extension, so an old host never sees it.
         proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
         extension->set_name(common::kClipboardImageExtension);
+
+        sendMessage(outgoing_message_.serialize());
+    }
+
+    host_supports_clipboard_html_ = extensions.contains(common::kClipboardHtmlExtension);
+    LOG(INFO) << "Host supports clipboard HTML:" << host_supports_clipboard_html_;
+
+    if (host_supports_clipboard_html_)
+    {
+        // Announce that this client takes formatted content, so the host forwards HTML instead of
+        // downgrading it to text. As with images, sent only once the host has declared it, so an
+        // old host never sees it.
+        proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
+        extension->set_name(common::kClipboardHtmlExtension);
 
         sendMessage(outgoing_message_.serialize());
     }
