@@ -345,6 +345,8 @@ void ClipboardWin::setDataHtml(const QByteArray& data)
         return;
     }
 
+    LOG(INFO) << "Applying HTML to clipboard, fragment" << data.size() << "bytes";
+
     const QByteArray cf_html = fragmentToHtmlFormat(data);
 
     // A plain-text rendering placed next to the HTML, so applications that read only CF_UNICODETEXT
@@ -606,7 +608,12 @@ bool ClipboardWin::onClipboardHtml()
 
         HGLOBAL html_global = clipboard.data(html_format_);
         if (!html_global)
+        {
+            // The format was advertised but produced no data - typically an application that offers
+            // HTML by delayed rendering and did not satisfy the request. Fall back to plain text.
+            PLOG(WARNING) << "HTML format available but GetClipboardData returned nothing";
             return false;
+        }
 
         base::ScopedHGLOBAL<char> html_lock(html_global);
         if (!html_lock.get())
@@ -673,6 +680,9 @@ bool ClipboardWin::onClipboardHtml()
             QTextDocumentFragment::fromHtml(QString::fromUtf8(fragment)).toPlainText();
         text_fallback = plain.toUtf8();
     }
+
+    LOG(INFO) << "Clipboard HTML taken, fragment" << fragment.size() << "bytes, text fallback"
+              << text_fallback.size() << "bytes";
 
     onData(Clipboard::kMimeTypeTextHtml, fragment, text_fallback);
     return true;

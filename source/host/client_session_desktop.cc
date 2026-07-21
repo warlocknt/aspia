@@ -498,6 +498,8 @@ void ClientSessionDesktop::injectClipboardEvent(const proto::desktop::ClipboardE
         if (event.mime_type() == common::Clipboard::kMimeTypeTextHtml.toStdString() &&
             !client_supports_clipboard_html_)
         {
+            LOG(INFO) << "Clipboard HTML downgraded to text: client does not support HTML";
+
             proto::desktop::ClipboardEvent text_event;
             text_event.set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
             text_event.set_data(event.text_fallback());
