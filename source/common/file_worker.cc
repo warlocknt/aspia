@@ -376,9 +376,21 @@ void FileWorker::doPacketRequest(
 {
     if (!packetizer_)
     {
-        // Set the unknown status of the request. The connection will be closed.
-        reply->set_error_code(proto::file_transfer::ERROR_CODE_UNKNOWN);
-        LOG(ERROR) << "Unexpected file packet request";
+        // A pipelining client can have one or more packet requests already on the wire when the
+        // packet carrying LAST_PACKET arrives and the packetizer is released here. Those requests
+        // are not a protocol error - they simply overran the end of the file. Answer them with an
+        // empty final packet instead of failing the session (which is what closed the connection
+        // and broke every multi-packet download). A well-behaved client ignores a packet that
+        // arrives after it has already seen LAST_PACKET.
+        //
+        // A stop-and-wait client (2.7.0 and earlier) never sends such a request, so it never
+        // reaches this path.
+        std::unique_ptr<proto::file_transfer::Packet> packet =
+            std::make_unique<proto::file_transfer::Packet>();
+        packet->set_flags(proto::file_transfer::Packet::LAST_PACKET);
+
+        reply->set_error_code(proto::file_transfer::ERROR_CODE_SUCCESS);
+        reply->set_allocated_packet(packet.release());
     }
     else
     {

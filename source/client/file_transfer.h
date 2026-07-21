@@ -187,7 +187,9 @@ private:
     void targetReply(const proto::file_transfer::Request& request, const proto::file_transfer::Reply& reply);
     void sourceReply(const proto::file_transfer::Request& request, const proto::file_transfer::Reply& reply);
     void requestNextSourcePacket();
-    void abandonCurrentFile();
+    void maybeRequestMorePackets();
+    void advanceOrDrain();
+    void applyAction(Error::Type error_type, Error::Action action);
     void doFrontTask(bool overwrite);
     void doNextTask();
     void doUpdateSpeed();
@@ -216,22 +218,34 @@ private:
     // or the link becomes the limit. 8 packets of 256 KB keep at most 2 MB buffered.
     static constexpr int kPacketWindow = 8;
 
-    // Packets in flight on the remote leg: unacknowledged sent packets when uploading,
-    // outstanding packet requests when downloading.
+    // Requests/packets outstanding on the remote leg: unacknowledged packet writes when uploading,
+    // packet requests not yet answered when downloading. A file's packet phase is not finished,
+    // and the next file's first request is not sent, until this returns to zero - so a reply can
+    // never be mistaken for one belonging to the next file, and the fragile per-reply counting an
+    // earlier version relied on is gone.
     int remote_in_flight_ = 0;
-
-    // Replies that belong to a file that is no longer being transferred - the tail of the window
-    // after an error, or requests that overshot the end of a shrinking file. They arrive before
-    // any reply of the next file (the queue is strictly ordered), so they are counted and
-    // swallowed rather than misattributed. Split by direction of the reply they swallow.
-    int drain_target_replies_ = 0;
-    int drain_source_replies_ = 0;
 
     // Per-file flags, reset in doFrontTask().
     bool source_exhausted_ = false;       // the source produced its LAST_PACKET
     bool source_request_pending_ = false; // upload only: a local read is outstanding
     bool local_write_pending_ = false;    // download only: a local write is outstanding
     bool file_failed_ = false;            // the current file hit an error; ignore its stragglers
+
+    // Download only. Speculative packet requests are capped at the packet count implied by the
+    // file size known when the queue was built, so an unchanged file is never over-requested -
+    // the last request returns LAST_PACKET and no straggler is produced, which keeps even a peer
+    // that closes on overrun (2.7.0) safe. If the file turns out longer, requesting continues one
+    // at a time past the cap (never speculating past an end we cannot see); if shorter, the few
+    // overrun requests rely on the host answering them with an empty final packet.
+    qint64 expected_packets_ = 0;
+    int packets_requested_ = 0;
+
+    // The user resolved an error (skip/replace) while requests were still draining. The chosen
+    // action is remembered and applied once remote_in_flight_ reaches zero, so the next file does
+    // not start on top of the previous one's stragglers.
+    bool has_pending_action_ = false;
+    Error::Type pending_action_type_ = Error::Type::OTHER;
+    Error::Action pending_action_ = Error::ACTION_ASK;
 
     // Download only: packets received from the remote source while a local write is still in
     // progress. Written strictly in order, one at a time; bounded by kPacketWindow.

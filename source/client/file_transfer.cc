@@ -292,36 +292,18 @@ void FileTransfer::targetReply(
         }
         else
         {
-            // The source is the remote side: the window forms here, as several packet requests
-            // put on the wire at once. Requests beyond the end of the file would hit a closed
-            // packetizer, so the burst is capped by the expected packet count; if the file grows
-            // meanwhile, the steady state below keeps at least one request outstanding anyway.
+            // The source is the remote side. The window is filled with packet requests, but
+            // capped at the number of packets the file is expected to hold, so an unchanged file
+            // is requested exactly and produces no straggler.
             const qint64 file_size = frontTask().size();
-            const qint64 expected_packets =
-                std::max<qint64>(1, (file_size + common::kMaxFilePacketSize - 1) /
-                                        common::kMaxFilePacketSize);
-            const int burst = static_cast<int>(std::min<qint64>(kPacketWindow, expected_packets));
-
-            for (int i = 0; i < burst; ++i)
-            {
-                emit sig_doTask(task_factory_source_->packetRequest(
-                    proto::file_transfer::PacketRequest::NO_FLAGS));
-                ++remote_in_flight_;
-            }
+            expected_packets_ = std::max<qint64>(
+                1, (file_size + common::kMaxFilePacketSize - 1) / common::kMaxFilePacketSize);
+            maybeRequestMorePackets();
         }
     }
     else if (request.has_packet())
     {
-        // Stragglers of an abandoned file arrive before any reply of the next one - the queue is
-        // strictly ordered - so they are swallowed by count, not misattributed.
-        if (drain_target_replies_ > 0)
-        {
-            --drain_target_replies_;
-            return;
-        }
-
-        // This reply is off the wire either way - account for it before deciding anything, so
-        // that an error does not count itself into the drain.
+        // A local write completed (download) or the host acknowledged a packet (upload).
         if (type_ == Type::UPLOADER)
             --remote_in_flight_;
         else
@@ -329,14 +311,21 @@ void FileTransfer::targetReply(
 
         if (reply.error_code() != proto::file_transfer::ERROR_CODE_SUCCESS)
         {
-            abandonCurrentFile();
+            file_failed_ = true;
+            source_exhausted_ = true;
             onError(Error::Type::WRITE_FILE, reply.error_code(), frontTask().targetPath());
+            advanceOrDrain();
             return;
         }
 
         if (file_failed_)
+        {
+            advanceOrDrain();
             return;
+        }
 
+        // A packet has now definitely moved end to end (written to the local disk on download,
+        // acknowledged by the host on upload), so advance progress for either direction.
         const qint64 full_task_size = frontTask().size();
         if (full_task_size && total_size_)
         {
@@ -367,45 +356,32 @@ void FileTransfer::targetReply(
             }
         }
 
-        if (request.packet().flags() & proto::file_transfer::Packet::LAST_PACKET)
+        if (type_ == Type::DOWNLOADER)
         {
-            doNextTask();
-            return;
-        }
-
-        if (type_ == Type::UPLOADER)
-        {
-            // An ack freed a slot in the window. Resume producing if the source still has data
-            // and no read is already on its way (the window being full is what paused it).
-            if (!source_exhausted_ && !source_request_pending_)
-                requestNextSourcePacket();
-        }
-        else
-        {
-            // Write the next buffered packet, if the remote side is ahead of the disk.
+            // Write the next buffered packet if the network ran ahead of the disk.
             if (!pending_writes_.isEmpty())
             {
                 local_write_pending_ = true;
                 emit sig_doTask(task_factory_target_->packet(pending_writes_.dequeue()));
             }
 
-            // A write completing frees budget that the arrival path may have been unable to
-            // spend; top the window back up so a slow disk does not starve the pipe once it
-            // catches up.
-            if (!source_exhausted_)
+            // A completed write freed budget the arrival path could not spend; top the window up
+            // so a slow disk does not starve the pipe once it catches up.
+            maybeRequestMorePackets();
+            advanceOrDrain();
+        }
+        else // UPLOADER
+        {
+            if (request.packet().flags() & proto::file_transfer::Packet::LAST_PACKET)
             {
-                const int budgeted = remote_in_flight_ + pending_writes_.size() +
-                                     (local_write_pending_ ? 1 : 0);
-                if (budgeted < kPacketWindow)
-                {
-                    quint32 flags = proto::file_transfer::PacketRequest::NO_FLAGS;
-                    if (is_canceled_)
-                        flags = proto::file_transfer::PacketRequest::CANCEL;
-
-                    emit sig_doTask(task_factory_source_->packetRequest(flags));
-                    ++remote_in_flight_;
-                }
+                advanceOrDrain();
+                return;
             }
+
+            // An ack freed a slot in the window. Resume producing if the source still has data
+            // and no read is already on its way (the window being full is what paused it).
+            if (!source_exhausted_ && !source_request_pending_)
+                requestNextSourcePacket();
         }
     }
     else
@@ -438,13 +414,6 @@ void FileTransfer::sourceReply(
     }
     else if (request.has_packet_request())
     {
-        // Stragglers of an abandoned or shrunken file; see drain_target_replies_.
-        if (drain_source_replies_ > 0)
-        {
-            --drain_source_replies_;
-            return;
-        }
-
         if (type_ == Type::UPLOADER)
             source_request_pending_ = false;
         else
@@ -452,41 +421,39 @@ void FileTransfer::sourceReply(
 
         if (reply.error_code() != proto::file_transfer::ERROR_CODE_SUCCESS)
         {
-            abandonCurrentFile();
+            file_failed_ = true;
+            source_exhausted_ = true;
             onError(Error::Type::READ_FILE, reply.error_code(), frontTask().sourcePath());
+            advanceOrDrain();
             return;
         }
 
-        if (file_failed_)
+        // Once the real last packet has been seen (or the file was abandoned), any further packet
+        // is one this side speculatively requested past the end. The host answers those with an
+        // empty final packet; ignore them and let the in-flight count drain.
+        if (file_failed_ || (type_ == Type::DOWNLOADER && source_exhausted_))
+        {
+            advanceOrDrain();
             return;
+        }
 
         const bool last_packet =
             (reply.packet().flags() & proto::file_transfer::Packet::LAST_PACKET) != 0;
 
         if (last_packet)
-        {
             source_exhausted_ = true;
-
-            if (type_ == Type::DOWNLOADER)
-            {
-                // Requests that overshot the end of the file will come back as errors from a
-                // packetizer that no longer exists; swallow them.
-                drain_source_replies_ += remote_in_flight_;
-                remote_in_flight_ = 0;
-            }
-        }
 
         if (type_ == Type::UPLOADER)
         {
             emit sig_doTask(task_factory_target_->packet(reply.packet()));
             ++remote_in_flight_;
 
-            // Keep the pipe full: ask the disk for the next packet while this one is on the
-            // wire, unless the window is full - then the next ack resumes the reads.
+            // Keep the pipe full: ask the disk for the next packet while this one is on the wire,
+            // unless the window is full - then the next ack resumes the reads.
             if (!last_packet && remote_in_flight_ < kPacketWindow)
                 requestNextSourcePacket();
         }
-        else
+        else // DOWNLOADER
         {
             // Local writes stay strictly serial and ordered; buffer what the network delivered
             // ahead of the disk.
@@ -500,24 +467,8 @@ void FileTransfer::sourceReply(
                 emit sig_doTask(task_factory_target_->packet(reply.packet()));
             }
 
-            // Replace the consumed request - but only while the total of requests on the wire
-            // and packets waiting for the disk stays within the window. Without this cap a disk
-            // slower than the network would buffer the whole file in memory; with it, once the
-            // buffer fills the requests stop, and each completed write issues the next one.
-            if (!last_packet)
-            {
-                const int budgeted = remote_in_flight_ + pending_writes_.size() +
-                                     (local_write_pending_ ? 1 : 0);
-                if (budgeted < kPacketWindow)
-                {
-                    quint32 flags = proto::file_transfer::PacketRequest::NO_FLAGS;
-                    if (is_canceled_)
-                        flags = proto::file_transfer::PacketRequest::CANCEL;
-
-                    emit sig_doTask(task_factory_source_->packetRequest(flags));
-                    ++remote_in_flight_;
-                }
-            }
+            maybeRequestMorePackets();
+            advanceOrDrain();
         }
     }
     else
@@ -532,6 +483,25 @@ void FileTransfer::setAction(Error::Type error_type, Error::Action action)
     LOG(INFO) << "Set action for error" << static_cast<int>(error_type) << ":"
               << static_cast<int>(action);
 
+    // Skip and Replace move to the next file (or restart this one), which must not happen while
+    // the failed file still has requests draining - a straggler would be charged to whatever runs
+    // next. Abort tears everything down and is safe immediately. If anything is still in flight,
+    // remember the choice and apply it from advanceOrDrain() once the count reaches zero.
+    if (action != Error::ACTION_ABORT &&
+        (remote_in_flight_ > 0 || local_write_pending_ || !pending_writes_.isEmpty()))
+    {
+        has_pending_action_ = true;
+        pending_action_type_ = error_type;
+        pending_action_ = action;
+        return;
+    }
+
+    applyAction(error_type, action);
+}
+
+//--------------------------------------------------------------------------------------------------
+void FileTransfer::applyAction(Error::Type error_type, Error::Action action)
+{
     switch (action)
     {
         case Error::ACTION_ABORT:
@@ -576,28 +546,53 @@ void FileTransfer::requestNextSourcePacket()
 }
 
 //--------------------------------------------------------------------------------------------------
-void FileTransfer::abandonCurrentFile()
+void FileTransfer::maybeRequestMorePackets()
 {
-    // The file is done for, but its window may still have replies on the way back. Everything
-    // in flight now belongs to nobody: arrange for it to be swallowed, in order, before the
-    // replies of whatever file comes next.
-    file_failed_ = true;
+    // Download only. Keep the window populated while the source still has data. The budget counts
+    // requests on the wire, packets waiting for the disk, and the one being written, so a disk
+    // slower than the network cannot buffer the whole file in memory - once the buffer fills the
+    // requests stop, and each completed write issues the next.
+    if (type_ != Type::DOWNLOADER || source_exhausted_ || file_failed_)
+        return;
 
-    if (type_ == Type::UPLOADER)
+    while (remote_in_flight_ + pending_writes_.size() + (local_write_pending_ ? 1 : 0) <
+           kPacketWindow)
     {
-        drain_target_replies_ += remote_in_flight_;
-        if (source_request_pending_)
-            ++drain_source_replies_;
+        // Stay within the expected packet count. Past it the file must have grown since the queue
+        // was built, so continue - but only one request at a time (never while another is already
+        // outstanding), so nothing is speculatively sent past an end we have not yet observed.
+        if (packets_requested_ >= expected_packets_ && remote_in_flight_ > 0)
+            break;
+
+        quint32 flags = proto::file_transfer::PacketRequest::NO_FLAGS;
+        if (is_canceled_)
+            flags = proto::file_transfer::PacketRequest::CANCEL;
+
+        emit sig_doTask(task_factory_source_->packetRequest(flags));
+        ++remote_in_flight_;
+        ++packets_requested_;
     }
-    else
+}
+
+//--------------------------------------------------------------------------------------------------
+void FileTransfer::advanceOrDrain()
+{
+    // A reply can never be charged to the wrong file: the current file is not left until every
+    // request it put on the wire has come back and the disk has caught up. Only then does the
+    // next file - or the user's resolution of an error - proceed.
+    if (remote_in_flight_ > 0 || local_write_pending_ || !pending_writes_.isEmpty())
+        return;
+
+    if (has_pending_action_)
     {
-        drain_source_replies_ += remote_in_flight_;
-        pending_writes_.clear();
+        has_pending_action_ = false;
+        applyAction(pending_action_type_, pending_action_);
+        return;
     }
 
-    remote_in_flight_ = 0;
-    source_request_pending_ = false;
-    local_write_pending_ = false;
+    // Normal completion: the source is drained, nothing failed, nothing outstanding.
+    if (source_exhausted_ && !file_failed_)
+        doNextTask();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -606,13 +601,14 @@ void FileTransfer::doFrontTask(bool overwrite)
     task_percentage_ = 0;
     task_transfered_size_ = 0;
 
-    // Per-file transfer state. The drain counters are deliberately NOT reset: they swallow
-    // stragglers of the previous file, which arrive before anything sent for this one.
+    // Per-file transfer state.
     remote_in_flight_ = 0;
     source_exhausted_ = false;
     source_request_pending_ = false;
     local_write_pending_ = false;
     file_failed_ = false;
+    expected_packets_ = 0;
+    packets_requested_ = 0;
     pending_writes_.clear();
 
     Task& front_task = frontTask();
