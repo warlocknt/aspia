@@ -155,9 +155,10 @@ ScreenCapturer::Error ScreenCapturerWrapper::captureFrame(
         // The capturer is chosen once, so a session that fell back to GDI would otherwise stay
         // slow until the client reconnects - even though DXGI typically becomes available again
         // seconds later (once the machine finishes waking up or the login desktop appears).
-        // Re-run the selection at a low rate; each attempt resets the timer, so this repeats
-        // until DXGI sticks and costs one selection per interval at worst.
-        const auto kRetryInterval = std::chrono::seconds(30);
+        // Retry often, so the operator gets the fast capturer back in a few seconds rather than
+        // being stuck on GDI for a minute-plus. Each attempt resets the timer, so this costs one
+        // selection per interval at worst; a rebuild of the DXGI stack is cheap enough for 5 s.
+        const auto kRetryInterval = std::chrono::seconds(5);
 
         if (std::chrono::steady_clock::now() - last_capturer_retry_ >= kRetryInterval)
         {
