@@ -417,9 +417,16 @@ void FileWorker::doPacket(
 {
     if (!depacketizer_)
     {
-        // Set the unknown status of the request. The connection will be closed.
-        reply->set_error_code(proto::file_transfer::ERROR_CODE_UNKNOWN);
-        LOG(ERROR) << "Unexpected file packet";
+        // A pipelining client can have several packets already on the wire when a write fails and
+        // the depacketizer is released below (a full disk, for example). Those packets arrive to
+        // no depacketizer - not a protocol error, just the tail of the window overrunning the
+        // aborted file. Acknowledge them and move on instead of failing the session, which used to
+        // close the connection out from under the client and crash it mid-transfer. The client has
+        // already abandoned the file and ignores these replies. This mirrors doPacketRequest().
+        //
+        // A stop-and-wait client (2.7.0 and earlier) never has packets in flight past an error, so
+        // it never reaches this path.
+        reply->set_error_code(proto::file_transfer::ERROR_CODE_SUCCESS);
     }
     else
     {

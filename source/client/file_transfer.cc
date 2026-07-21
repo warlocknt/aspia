@@ -313,6 +313,9 @@ void FileTransfer::targetReply(
         {
             file_failed_ = true;
             source_exhausted_ = true;
+            // Buffered packets will never be written now; drop them so advanceOrDrain() is not
+            // left waiting forever for a queue that nothing drains.
+            pending_writes_.clear();
             onError(Error::Type::WRITE_FILE, reply.error_code(), frontTask().targetPath());
             advanceOrDrain();
             return;
@@ -423,6 +426,7 @@ void FileTransfer::sourceReply(
         {
             file_failed_ = true;
             source_exhausted_ = true;
+            pending_writes_.clear();
             onError(Error::Type::READ_FILE, reply.error_code(), frontTask().sourcePath());
             advanceOrDrain();
             return;
