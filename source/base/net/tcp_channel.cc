@@ -36,7 +36,12 @@ namespace base {
 namespace {
 
 const int kWriteQueueReservedSize = 64;
-const TcpChannel::Seconds kKeepAliveInterval { 60 };
+// A dead peer is noticed after at most kKeepAliveInterval (idle before a ping is sent) plus
+// kKeepAliveTimeout (wait for the reply). Halving the interval to match upstream cuts the
+// worst-case detection from ~90 s to ~60 s: when a laptop host sleeps and its Wi-Fi drops, the
+// socket is already dead on resume and only this timer reconnects it, so the console froze on the
+// last frame for ~2 min. The cost is a ping every 30 s of idle instead of 60 - a few bytes.
+const TcpChannel::Seconds kKeepAliveInterval { 30 };
 const TcpChannel::Seconds kKeepAliveTimeout { 30 };
 
 //--------------------------------------------------------------------------------------------------
