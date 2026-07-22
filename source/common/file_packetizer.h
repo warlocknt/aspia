@@ -37,9 +37,12 @@ public:
     // If the specified file can not be opened for reading, then returns nullptr.
     static std::unique_ptr<FilePacketizer> create(const QString& file_path);
 
-    // Creates a packet for transferring.
+    // Creates a packet for transferring. When |compress| is true each chunk is zstd-compressed and
+    // sent compressed only if that came out smaller than the raw bytes (adaptive, per chunk), with
+    // the COMPRESSED_ZSTD flag set. When false, or when compression did not help, the raw bytes are
+    // sent. |compress| must be false unless the peer negotiated the "zstd" capability.
     std::unique_ptr<proto::file_transfer::Packet> readNextPacket(
-        const proto::file_transfer::PacketRequest& request);
+        const proto::file_transfer::PacketRequest& request, bool compress);
 
 private:
     explicit FilePacketizer(std::unique_ptr<QFile> file);

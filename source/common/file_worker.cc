@@ -394,7 +394,8 @@ void FileWorker::doPacketRequest(
     }
     else
     {
-        std::unique_ptr<proto::file_transfer::Packet> packet = packetizer_->readNextPacket(request);
+        std::unique_ptr<proto::file_transfer::Packet> packet =
+            packetizer_->readNextPacket(request, compression_enabled_);
         if (!packet)
         {
             reply->set_error_code(proto::file_transfer::ERROR_CODE_FILE_READ_ERROR);

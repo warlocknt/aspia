@@ -40,6 +40,11 @@ public:
     void doRequest(const common::FileTask& task);
     void doRequest(const proto::file_transfer::Request& request, proto::file_transfer::Reply* reply);
 
+    // Whether packets this worker produces may be zstd-compressed. Set by the session once it knows
+    // the peer accepts compression (from the capability handshake). Only affects reads/packetizing;
+    // incoming packets are decompressed by flag regardless.
+    void setCompressionEnabled(bool enabled) { compression_enabled_ = enabled; }
+
 private:
     void doDriveListRequest(proto::file_transfer::Reply* reply);
     void doFileListRequest(const proto::file_transfer::ListRequest& request, proto::file_transfer::Reply* reply);
@@ -55,6 +60,8 @@ private:
 
     std::unique_ptr<FileDepacketizer> depacketizer_;
     std::unique_ptr<FilePacketizer> packetizer_;
+
+    bool compression_enabled_ = false;
 
     Q_DISABLE_COPY(FileWorker)
 };

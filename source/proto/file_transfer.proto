@@ -99,6 +99,12 @@ message Packet
         NO_FLAGS     = 0;
         FIRST_PACKET = 1;
         LAST_PACKET  = 2;
+
+        // |data| is a zstd-compressed chunk rather than the raw bytes. Set per packet: the sender
+        // compresses each chunk and keeps it only when it came out smaller, so an incompressible
+        // chunk is still sent raw and without this flag. Only sent to a peer that negotiated the
+        // "zstd" compression capability, so an older peer never sees it.
+        COMPRESSED_ZSTD = 4;
     }
 
     uint32 flags = 1;

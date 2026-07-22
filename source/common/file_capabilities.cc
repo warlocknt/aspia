@@ -22,6 +22,14 @@
 
 namespace common {
 
+namespace {
+
+// The only compression algorithm this build produces and consumes. The per-packet COMPRESSED_ZSTD
+// flag identifies it on the wire, so no algorithm name travels with each chunk.
+const char kCompressionZstd[] = "zstd";
+
+} // namespace
+
 //--------------------------------------------------------------------------------------------------
 void setLocalFileCapabilities(proto::file_transfer::FileCapabilities* out)
 {
@@ -30,8 +38,26 @@ void setLocalFileCapabilities(proto::file_transfer::FileCapabilities* out)
     // side later without breaking the other.
     out->set_max_packet_size(static_cast<quint32>(kMaxFilePacketSize));
 
-    // No optional features are offered yet. Compression (task #20), checksums, resume and the rest
-    // are added here as they land - a new name in features/compression/checksum, nothing else.
+    // Per-chunk zstd compression. Listed rather than assumed so that a peer without it (an older
+    // build, or a future one that dropped it) is simply sent raw packets.
+    out->add_compression(kCompressionZstd);
+
+    // Checksums, resume and the rest are added here as they land - a new name in the relevant list,
+    // nothing else in the handshake plumbing.
+}
+
+//--------------------------------------------------------------------------------------------------
+std::string negotiatedCompression(const proto::file_transfer::FileCapabilities& peer)
+{
+    // Only zstd exists on this side; use it if the peer listed it. When more algorithms appear this
+    // becomes "first of our preference order that the peer also has".
+    for (const std::string& algorithm : peer.compression())
+    {
+        if (algorithm == kCompressionZstd)
+            return kCompressionZstd;
+    }
+
+    return std::string();
 }
 
 } // namespace common

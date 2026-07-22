@@ -19,6 +19,7 @@
 #include "common/file_depacketizer.h"
 
 #include "base/logging.h"
+#include "base/codec/zstd_compress.h"
 
 namespace common {
 
@@ -64,8 +65,9 @@ bool FileDepacketizer::writeNextPacket(const proto::file_transfer::Packet& packe
 {
     DCHECK(file_->isOpen());
 
-    const size_t packet_size = packet.data().size();
-    if (!packet_size)
+    // The empty-packet sentinels (zero-length file, cancel) are judged by the wire size: they carry
+    // no data and are never compressed.
+    if (!packet.data().size())
     {
         if (packet.flags() & proto::file_transfer::Packet::LAST_PACKET)
         {
@@ -88,6 +90,25 @@ bool FileDepacketizer::writeNextPacket(const proto::file_transfer::Packet& packe
         return false;
     }
 
+    // A compressed chunk is expanded back to its original bytes here; the write and the progress
+    // accounting below both work on the uncompressed payload, so |packet_size| is the real length.
+    std::string decompressed;
+    const std::string* payload = &packet.data();
+
+    if (packet.flags() & proto::file_transfer::Packet::COMPRESSED_ZSTD)
+    {
+        decompressed = base::ZstdCompress::decompress(packet.data());
+        if (decompressed.empty())
+        {
+            LOG(ERROR) << "Unable to decompress packet of" << packet.data().size() << "bytes";
+            return false;
+        }
+
+        payload = &decompressed;
+    }
+
+    const size_t packet_size = payload->size();
+
     // The first packet must have the full file size.
     if (packet.flags() & proto::file_transfer::Packet::FIRST_PACKET)
     {
@@ -101,7 +122,7 @@ bool FileDepacketizer::writeNextPacket(const proto::file_transfer::Packet& packe
         return false;
     }
 
-    if (file_->write(packet.data().data(), packet_size) == -1)
+    if (file_->write(payload->data(), packet_size) == -1)
     {
         LOG(ERROR) << "Unable to write file";
         return false;

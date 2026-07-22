@@ -25,9 +25,13 @@ namespace common {
 
 // Fills |out| with the optional file-transfer features this build supports. Both peers call it - the
 // client to announce itself on the first request, the host to answer on the reply - so the set is
-// defined in exactly one place. Feature-adding tasks (compression, checksums, resume, ...) extend
-// this and nothing else in the handshake plumbing.
+// defined in exactly one place. Feature-adding tasks (checksums, resume, ...) extend this and
+// nothing else in the handshake plumbing.
 void setLocalFileCapabilities(proto::file_transfer::FileCapabilities* out);
+
+// The compression algorithm to use when sending to a peer with these capabilities, or empty if none
+// is shared. This side only produces zstd today, so it returns "zstd" when the peer accepts it.
+std::string negotiatedCompression(const proto::file_transfer::FileCapabilities& peer);
 
 } // namespace common
 

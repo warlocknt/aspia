@@ -89,8 +89,13 @@ void FileAgent::onIpcMessageReceived(const QByteArray& buffer)
         {
             client_supports_file_caps_ = true;
             client_file_caps_ = request.capabilities();
+
+            // Compress the packets this side sends (downloads) only if the client will accept them.
+            const bool compress = !common::negotiatedCompression(client_file_caps_).empty();
+            worker_->setCompressionEnabled(compress);
+
             LOG(INFO) << "Client supports file capabilities (max_packet_size="
-                      << client_file_caps_.max_packet_size() << ")";
+                      << client_file_caps_.max_packet_size() << ", compression=" << compress << ")";
         }
 
         common::setLocalFileCapabilities(reply->mutable_capabilities());

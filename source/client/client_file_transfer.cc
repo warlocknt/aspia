@@ -85,8 +85,15 @@ void ClientFileTransfer::onSessionMessageReceived(const QByteArray& buffer)
     {
         host_supports_file_caps_ = true;
         host_file_caps_ = reply.capabilities();
+
+        // Compress the packets this side sends (uploads) only if the host will accept them. The
+        // local worker's packetizer produces those; its depacketizer (downloads) decompresses by
+        // flag regardless of this.
+        const bool compress = !common::negotiatedCompression(host_file_caps_).empty();
+        local_worker_->setCompressionEnabled(compress);
+
         LOG(INFO) << "Host supports file capabilities (max_packet_size="
-                  << host_file_caps_.max_packet_size() << ")";
+                  << host_file_caps_.max_packet_size() << ", compression=" << compress << ")";
     }
 
     if (reply.error_code() == proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER ||
