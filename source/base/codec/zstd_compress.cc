@@ -40,7 +40,13 @@ T compressT(const T& source, int compress_level)
         return T();
     }
 
-    ScopedZstdCStream stream;
+    ScopedZstdCStream stream(ZSTD_createCStream());
+    if (!stream)
+    {
+        LOG(ERROR) << "ZSTD_createCStream failed";
+        return T();
+    }
+
     size_t ret = ZSTD_initCStream(stream.get(), compress_level);
     if (ZSTD_isError(ret))
     {
@@ -81,6 +87,10 @@ T compressT(const T& source, int compress_level)
         return T();
     }
 
+    // |target| was sized to the worst case (ZSTD_compressBound); shrink it to the size actually
+    // produced, so callers can compare it against the input and store only the real bytes.
+    target.resize(static_cast<typename T::size_type>(output.pos + sizeof(quint32)));
+
     return target;
 }
 
@@ -105,7 +115,13 @@ T decompressT(const T& source)
     T target;
     target.resize(target_data_size);
 
-    ScopedZstdDStream stream;
+    ScopedZstdDStream stream(ZSTD_createDStream());
+    if (!stream)
+    {
+        LOG(ERROR) << "ZSTD_createDStream failed";
+        return T();
+    }
+
     size_t ret = ZSTD_initDStream(stream.get());
     if (ZSTD_isError(ret))
     {
