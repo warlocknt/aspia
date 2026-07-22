@@ -146,12 +146,47 @@ enum ErrorCode
     ERROR_CODE_USER_SESSION_LOCKED = 15;
 }
 
+// Optional features negotiated at the start of a file-transfer session. Sent piggybacked on the
+// first normal request (client) and echoed on that request's reply (host): a peer that carries this
+// field supports the mechanism, one that does not is an older build and is used as before. There is
+// no version gate - the presence of the field IS the signal. See task #21 for the full model.
+message FileCapabilities
+{
+    // Boolean feature names, e.g. "resume", "preserve_timestamps". A name present means supported.
+    repeated string features = 1;
+
+    // Compression algorithms this side can both produce and consume, in preference order (e.g.
+    // "zstd"). Empty means no compression. A list rather than a bool so lz4/brotli can be added
+    // later without a schema change.
+    repeated string compression = 2;
+
+    // Integrity algorithms supported, in preference order (e.g. "xxh3", "sha256"). Empty means none.
+    repeated string checksum = 3;
+
+    // Largest packet payload (uncompressed) this side will accept, in bytes. 0 means the historical
+    // default. The sender uses min(local, peer).
+    uint32 max_packet_size = 4;
+
+    // Escape hatch for a future capability that needs a structured payload: a name and an opaque
+    // blob parsed only by code that knows the name. Keeps the door open without reserving fields.
+    message Extra
+    {
+        string name = 1;
+        bytes data  = 2;
+    }
+    repeated Extra extra = 5;
+}
+
 message Reply
 {
     ErrorCode error_code = 1;
     DriveList drive_list = 2;
     List file_list       = 3;
     Packet packet        = 4;
+
+    // Present only on the reply to the request that carried the client's capabilities. Its presence
+    // tells the client the host supports the mechanism.
+    FileCapabilities capabilities = 5;
 }
 
 message Request
@@ -165,4 +200,8 @@ message Request
     UploadRequest upload_request                    = 7;
     PacketRequest packet_request                    = 8;
     Packet packet                                   = 9;
+
+    // Carried on the first normal request of the session. An older host dispatches on the request
+    // above and ignores this field; a new host echoes its own capabilities on the reply.
+    FileCapabilities capabilities = 10;
 }

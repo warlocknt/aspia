@@ -19,6 +19,7 @@
 #include "client/client_file_transfer.h"
 
 #include "base/logging.h"
+#include "common/file_capabilities.h"
 #include "common/file_task_factory.h"
 
 namespace client {
@@ -76,6 +77,16 @@ void ClientFileTransfer::onSessionMessageReceived(const QByteArray& buffer)
 
         emit sig_errorOccurred(proto::file_transfer::ERROR_CODE_UNKNOWN);
         return;
+    }
+
+    // The host echoes its capabilities on the reply to our first request. Their presence is what
+    // tells us the host understands the mechanism; an older host never sets the field.
+    if (reply.has_capabilities() && !host_supports_file_caps_)
+    {
+        host_supports_file_caps_ = true;
+        host_file_caps_ = reply.capabilities();
+        LOG(INFO) << "Host supports file capabilities (max_packet_size="
+                  << host_file_caps_.max_packet_size() << ")";
     }
 
     if (reply.error_code() == proto::file_transfer::ERROR_CODE_NO_LOGGED_ON_USER ||
@@ -215,8 +226,25 @@ void ClientFileTransfer::pumpRemoteTasks()
     while (remote_tasks_in_flight_ < remote_task_queue_.size() &&
            remote_tasks_in_flight_ < kMaxInFlightRemoteTasks)
     {
-        sendMessage(serializer_.serialize(
-            remote_task_queue_.at(remote_tasks_in_flight_).request()));
+        const proto::file_transfer::Request& request =
+            remote_task_queue_.at(remote_tasks_in_flight_).request();
+
+        if (!file_caps_sent_)
+        {
+            // Announce our capabilities on the very first request of the session, piggybacked so
+            // the reply-to-request ordering is untouched. A copy is made because the queued request
+            // belongs to the task that produced it. An older host ignores the extra field.
+            proto::file_transfer::Request request_with_caps = request;
+            common::setLocalFileCapabilities(request_with_caps.mutable_capabilities());
+            file_caps_sent_ = true;
+
+            sendMessage(serializer_.serialize(request_with_caps));
+        }
+        else
+        {
+            sendMessage(serializer_.serialize(request));
+        }
+
         ++remote_tasks_in_flight_;
     }
 }

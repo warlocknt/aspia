@@ -46,6 +46,12 @@ private:
     base::Parser<proto::file_transfer::Request> request_;
     base::Serializer<proto::file_transfer::Reply> reply_;
 
+    // What the client announced on its first request. client_supports_file_caps_ stays false for an
+    // older client, which never carries the field. Feature-gating tasks (compression, ...) read
+    // client_file_caps_.
+    bool client_supports_file_caps_ = false;
+    proto::file_transfer::FileCapabilities client_file_caps_;
+
     Q_DISABLE_COPY(FileAgent)
 };
 

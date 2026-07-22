@@ -94,6 +94,17 @@ private:
 
     base::SerializerImpl serializer_;
 
+    // Set once the first remote request has carried this client's capabilities. Piggybacked rather
+    // than sent on its own: replies are matched to requests by queue order, so a standalone message
+    // would desynchronize that pairing.
+    bool file_caps_sent_ = false;
+
+    // What the host announced in reply. host_supports_file_caps_ stays false against an older host,
+    // which never echoes the field - that absence is the whole signal, no version check involved.
+    // Feature-gating tasks (compression, ...) read host_file_caps_.
+    bool host_supports_file_caps_ = false;
+    proto::file_transfer::FileCapabilities host_file_caps_;
+
     Q_DISABLE_COPY(ClientFileTransfer)
 };
 

@@ -25,6 +25,8 @@ list(APPEND SOURCE_COMMON
     clipboard_monitor.h
     desktop_session_constants.cc
     desktop_session_constants.h
+    file_capabilities.cc
+    file_capabilities.h
     file_depacketizer.cc
     file_depacketizer.h
     file_packet.h

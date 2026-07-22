@@ -20,6 +20,7 @@
 
 #include "base/logging.h"
 #include "base/serialization.h"
+#include "common/file_capabilities.h"
 
 #include <QCoreApplication>
 
@@ -74,7 +75,27 @@ void FileAgent::onIpcMessageReceived(const QByteArray& buffer)
         return;
     }
 
-    worker_->doRequest(request_.message(), &reply_.newMessage());
+    const proto::file_transfer::Request& request = request_.message();
+    proto::file_transfer::Reply* reply = &reply_.newMessage();
+
+    worker_->doRequest(request, reply);
+
+    // The client carries its capabilities on the first request; echo ours on this reply so it knows
+    // the host understands the mechanism. The real work above ran as usual - the field just rides
+    // along. An older client never sends it, so this stays untouched and it is used as before.
+    if (request.has_capabilities())
+    {
+        if (!client_supports_file_caps_)
+        {
+            client_supports_file_caps_ = true;
+            client_file_caps_ = request.capabilities();
+            LOG(INFO) << "Client supports file capabilities (max_packet_size="
+                      << client_file_caps_.max_packet_size() << ")";
+        }
+
+        common::setLocalFileCapabilities(reply->mutable_capabilities());
+    }
+
     ipc_channel_->send(reply_.serialize());
 }
 
