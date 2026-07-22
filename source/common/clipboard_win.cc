@@ -28,8 +28,8 @@
 #include <QBuffer>
 #include <QDataStream>
 #include <QImage>
+#include <QRegularExpression>
 #include <QStringList>
-#include <QTextDocumentFragment>
 
 namespace common {
 
@@ -250,6 +250,45 @@ bool hasOtherContent()
            IsClipboardFormatAvailable(CF_HDROP);
 }
 
+//--------------------------------------------------------------------------------------------------
+// A thread-safe, GUI-free reduction of an HTML fragment to plain text. Used only as a last resort
+// when no plain text rode along with the event, which for our own peers never happens.
+//
+// It must not use QTextDocument / QTextDocumentFragment: those live in QtGui, are not thread-safe,
+// and crash outright when they meet an <img> on this clipboard worker thread - which is exactly the
+// host-wedging bug this replaces. A tag strip is coarse, but it only backstops the rare empty-
+// fallback case; the real plain text is taken from the event's text_fallback.
+QByteArray htmlFragmentToPlainText(const QByteArray& html)
+{
+    QString text = QString::fromUtf8(html);
+
+    // Block boundaries become line breaks before the tags around them are removed.
+    static const QRegularExpression kBreaks(
+        QStringLiteral("<\\s*(br|/p|/div|/tr|/li|/h[1-6])\\b[^>]*>"),
+        QRegularExpression::CaseInsensitiveOption);
+    text.replace(kBreaks, QStringLiteral("\n"));
+
+    // Drop <style>/<script> together with their contents, then every remaining tag.
+    static const QRegularExpression kStyleScript(
+        QStringLiteral("<\\s*(style|script)\\b[^>]*>.*?<\\s*/\\s*\\1\\s*>"),
+        QRegularExpression::CaseInsensitiveOption | QRegularExpression::DotMatchesEverythingOption);
+    text.remove(kStyleScript);
+
+    static const QRegularExpression kTag(QStringLiteral("<[^>]*>"));
+    text.remove(kTag);
+
+    // Decode the handful of entities that actually turn up. "&amp;" is decoded last so an escaped
+    // entity like "&amp;lt;" does not collapse into "<".
+    text.replace(QStringLiteral("&nbsp;"), QStringLiteral(" "));
+    text.replace(QStringLiteral("&lt;"), QStringLiteral("<"));
+    text.replace(QStringLiteral("&gt;"), QStringLiteral(">"));
+    text.replace(QStringLiteral("&quot;"), QStringLiteral("\""));
+    text.replace(QStringLiteral("&#39;"), QStringLiteral("'"));
+    text.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
+
+    return text.toUtf8();
+}
+
 } // namespace
 
 //--------------------------------------------------------------------------------------------------
@@ -350,9 +389,14 @@ void ClipboardWin::setDataHtml(const QByteArray& data)
     const QByteArray cf_html = fragmentToHtmlFormat(data);
 
     // A plain-text rendering placed next to the HTML, so applications that read only CF_UNICODETEXT
-    // (Notepad, a terminal) still receive the text instead of nothing. Derived locally from the
-    // fragment here, independent of the text_fallback the sender carries for the network boundary.
-    QString plain = QTextDocumentFragment::fromHtml(QString::fromUtf8(data)).toPlainText();
+    // (Notepad, a terminal) still receive the text instead of nothing. Take the sender's own plain
+    // text, which rode along in the event for exactly this - it is what the source application chose
+    // and is already carried, so nothing is recomputed. Only if it is somehow absent do we strip the
+    // fragment locally. This must never call QTextDocument: it runs on the clipboard worker thread,
+    // where the QtGui rich-text engine is not thread-safe and crashes on an embedded image.
+    const QByteArray& fallback = injectedTextFallback();
+    QString plain = fallback.isEmpty() ? QString::fromUtf8(htmlFragmentToPlainText(data))
+                                       : QString::fromUtf8(fallback);
     plain.replace(QLatin1String("\n"), QLatin1String("\r\n"));
 
     base::ScopedClipboard clipboard;
@@ -675,11 +719,7 @@ bool ClipboardWin::onClipboardHtml()
     }
 
     if (text_fallback.isEmpty())
-    {
-        const QString plain =
-            QTextDocumentFragment::fromHtml(QString::fromUtf8(fragment)).toPlainText();
-        text_fallback = plain.toUtf8();
-    }
+        text_fallback = htmlFragmentToPlainText(fragment);
 
     LOG(INFO) << "Clipboard HTML taken, fragment" << fragment.size() << "bytes, text fallback"
               << text_fallback.size() << "bytes";

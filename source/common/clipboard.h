@@ -129,6 +129,12 @@ protected:
     void countUnsupportedOut();
     void countDegradedOut();
 
+    // The plain-text rendering that rode along with the event currently being injected (HTML only).
+    // The platform implementation uses it as the plain-text side of a formatted paste instead of
+    // recomputing it - recomputing meant a QtGui rich-text parse on this worker thread, which is
+    // not thread-safe and crashed on embedded images.
+    const QByteArray& injectedTextFallback() const { return injected_text_fallback_; }
+
     std::shared_ptr<ClipboardStats> stats_;
 
 private:
@@ -137,6 +143,10 @@ private:
     // back where it came from.
     QString last_mime_type_;
     QByteArray last_data_;
+
+    // Plain-text carried alongside the formatted content of the event being injected. Empty for
+    // text and images. Set before setData() is called, read by the platform implementation.
+    QByteArray injected_text_fallback_;
 };
 
 } // namespace common

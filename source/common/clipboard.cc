@@ -129,6 +129,11 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
     // The size was checked against kMaxClipboardDataSize above, so it fits the int this takes.
     last_data_ = QByteArray(event.data().data(), static_cast<int>(event.data().size()));
 
+    // Plain text the sender computed for this formatted content. The platform layer uses it as the
+    // plain-text side of the paste rather than parsing the HTML itself. Empty for text and images.
+    injected_text_fallback_ =
+        QByteArray(event.text_fallback().data(), static_cast<int>(event.text_fallback().size()));
+
     if (stats_)
     {
         if (mime_type == kMimeTypeTextUtf8)
