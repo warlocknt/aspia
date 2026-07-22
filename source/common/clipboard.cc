@@ -144,6 +144,11 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
             ++stats_->image_received;
     }
 
+    // Trace the apply side, which is otherwise silent: this is what a received (e.g. host->client)
+    // event actually puts on the local clipboard. Sizes only, never content.
+    LOG(INFO) << "Applying received clipboard: mime=" << mime_type << "data=" << last_data_.size()
+              << "bytes fallback=" << injected_text_fallback_.size() << "bytes";
+
     setData(last_mime_type_, last_data_);
 }
 
@@ -158,7 +163,14 @@ void Clipboard::onData(const QString& mime_type, const QByteArray& data,
                        const QByteArray& text_fallback)
 {
     if (mime_type == last_mime_type_ && data == last_data_)
+    {
+        // The local clipboard now matches what was just injected from the peer, so this change is
+        // that injection echoing back - not something to send. Traced because a genuine local copy
+        // wrongly matching here would look exactly like "the other direction does nothing".
+        LOG(INFO) << "Clipboard change matches last injected, not sending back: mime=" << mime_type
+                  << "size=" << data.size() << "bytes";
         return;
+    }
 
     // Dropping the event costs the user a clipboard that did not travel. Sending it would cost
     // them the whole session, because the channel treats an oversized message as a protocol
