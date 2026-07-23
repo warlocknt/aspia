@@ -332,19 +332,24 @@ void ScreenCapturerWrapper::selectCapturer(ScreenCapturer::Error last_error)
     LOG(INFO) << "Selected screen capturer:" << screen_capturer_->type();
 
 #if defined(Q_OS_WINDOWS)
-    // Landing on GDI while DXGI was expected means the fallback fired - seen in the field when
-    // the agent started during a suspend and no D3D device existed for those few seconds. GDI
-    // works but captures with a CPU copy, which the operator experiences as a jerky session.
-    // Remember that this is a fallback, so captureFrame() can periodically try DXGI again.
+    // Landing on GDI while DXGI was expected means the fallback fired. GDI works but captures with
+    // a CPU copy, which the operator experiences as a jerky session. Remember that this is a
+    // fallback, so captureFrame() can periodically try DXGI again and return the operator to the
+    // fast capturer on its own.
     //
-    // A PERMANENT capture error is excluded on purpose: that reset to GDI is deliberate, and
-    // retrying DXGI right after it would loop between the two.
+    // This deliberately includes the case where the DXGI capturer hit a PERMANENT error - which is
+    // exactly what a sleeping laptop host produces: the D3D device is lost on resume and takes a
+    // while to come back. That path used to be excluded to avoid "looping" between DXGI and GDI,
+    // but the field cost of the exclusion was the operator stuck on GDI for minutes until some
+    // unrelated event happened to re-select the capturer. The retry is at most one DXGI rebuild per
+    // interval with GDI serving frames in between, and it stops the instant a DXGI frame succeeds,
+    // so that "loop" is the recovery we want and it self-terminates. A session that deliberately
+    // uses GDI is still never retried: its preferred_type_ is WIN_GDI, excluded just below.
     dxgi_fallback_ =
         (preferred_type_ == ScreenCapturer::Type::DEFAULT ||
          preferred_type_ == ScreenCapturer::Type::WIN_DXGI) &&
         windowsVersion() >= VERSION_WIN8 &&
-        screen_capturer_->type() == ScreenCapturer::Type::WIN_GDI &&
-        last_error != ScreenCapturer::Error::PERMANENT;
+        screen_capturer_->type() == ScreenCapturer::Type::WIN_GDI;
     last_capturer_retry_ = std::chrono::steady_clock::now();
 
     if (dxgi_fallback_)
