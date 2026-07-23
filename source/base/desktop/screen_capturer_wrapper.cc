@@ -155,12 +155,19 @@ ScreenCapturer::Error ScreenCapturerWrapper::captureFrame(
         // The capturer is chosen once, so a session that fell back to GDI would otherwise stay
         // slow until the client reconnects - even though DXGI typically becomes available again
         // seconds later (once the machine finishes waking up or the login desktop appears).
-        // Retry often, so the operator gets the fast capturer back in a few seconds rather than
-        // being stuck on GDI for a minute-plus. Each attempt resets the timer, so this costs one
-        // selection per interval at worst; a rebuild of the DXGI stack is cheap enough for 5 s.
-        const auto kRetryInterval = std::chrono::seconds(5);
+        //
+        // The wake case is the common one and it recovers fast: a laptop host resumes, the display
+        // and D3D device come back within a second or two, and we want the operator back on DXGI the
+        // moment that happens - not up to 5 s later. So for a short window right after the fallback
+        // starts, retry every second. If DXGI still has not come back after that (a host where GDI is
+        // the lasting state - no D3D at all, or a genuinely long resume), back off to 5 s so we are
+        // not rebuilding the DXGI stack every second forever. Each attempt resets last_capturer_retry_.
+        const auto now = std::chrono::steady_clock::now();
+        const auto kFastRetryWindow = std::chrono::seconds(15);
+        const auto retry_interval = (now - fallback_since_ < kFastRetryWindow)
+            ? std::chrono::seconds(1) : std::chrono::seconds(5);
 
-        if (std::chrono::steady_clock::now() - last_capturer_retry_ >= kRetryInterval)
+        if (now - last_capturer_retry_ >= retry_interval)
         {
             LOG(INFO) << "Session is on the GDI fallback, retrying the preferred capturer";
             selectCapturer(ScreenCapturer::Error::SUCCEEDED);
@@ -345,12 +352,18 @@ void ScreenCapturerWrapper::selectCapturer(ScreenCapturer::Error last_error)
     // interval with GDI serving frames in between, and it stops the instant a DXGI frame succeeds,
     // so that "loop" is the recovery we want and it self-terminates. A session that deliberately
     // uses GDI is still never retried: its preferred_type_ is WIN_GDI, excluded just below.
+    const bool was_fallback = dxgi_fallback_;
     dxgi_fallback_ =
         (preferred_type_ == ScreenCapturer::Type::DEFAULT ||
          preferred_type_ == ScreenCapturer::Type::WIN_DXGI) &&
         windowsVersion() >= VERSION_WIN8 &&
         screen_capturer_->type() == ScreenCapturer::Type::WIN_GDI;
     last_capturer_retry_ = std::chrono::steady_clock::now();
+
+    // Mark the start of the fallback streak only on the transition into it, not on the repeated
+    // retries while already fallen back - captureFrame() uses this to retry fast at first, then slow.
+    if (dxgi_fallback_ && !was_fallback)
+        fallback_since_ = last_capturer_retry_;
 
     if (dxgi_fallback_)
     {

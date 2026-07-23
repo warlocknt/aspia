@@ -72,6 +72,11 @@ private:
     // again; the only cure used to be reconnecting.
     bool dxgi_fallback_ = false;
     std::chrono::steady_clock::time_point last_capturer_retry_;
+    // When the current GDI-fallback streak began (as opposed to last_capturer_retry_, which is reset
+    // on every attempt). A wake/unlock brings DXGI back within a second or two, so for a short window
+    // right after the fallback starts we retry aggressively to catch it the moment it recovers, then
+    // back off to avoid churning a DXGI rebuild every second on a host where GDI is the lasting state.
+    std::chrono::steady_clock::time_point fallback_since_;
 #endif
     Point last_cursor_pos_;
     bool enable_cursor_position_ = false;
