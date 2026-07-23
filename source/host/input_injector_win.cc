@@ -24,6 +24,8 @@
 
 #include <qt_windows.h>
 
+#include <atomic>
+
 namespace host {
 
 namespace {
@@ -33,6 +35,31 @@ const quint32 kUsbCodeLeftCtrl = 0x0700e0;
 const quint32 kUsbCodeRightCtrl = 0x0700e4;
 const quint32 kUsbCodeLeftAlt = 0x0700e2;
 const quint32 kUsbCodeRightAlt = 0x0700e6;
+
+// SendInput can keep failing for a long stretch - a UAC/secure-desktop prompt, the lock screen, or a
+// momentary loss of the input desktop - and it is driven at input rate (every mouse move), so logging
+// each failure would flood the log exactly when something is wrong. The counter is the state: 0 means
+// healthy, any non-zero value means a failure streak is in progress. We log the very first failure,
+// stay silent while it persists (still counting every one), and on the first success afterwards report
+// how many were suppressed - so a log reader sees the real scale of the outage.
+std::atomic<quint64> g_send_input_failures { 0 };
+
+//--------------------------------------------------------------------------------------------------
+void doSendInput(INPUT* input)
+{
+    if (SendInput(1, input, sizeof(INPUT)))
+    {
+        const quint64 suppressed = g_send_input_failures.exchange(0);
+        if (suppressed != 0)
+            LOG(INFO) << "SendInput recovered (" << suppressed << " failures suppressed)";
+        return;
+    }
+
+    // fetch_add returns the previous value; only the first failure of a streak is logged. PLOG reads
+    // GetLastError right here, and the atomic op above it does not touch it, so the error is intact.
+    if (g_send_input_failures.fetch_add(1) == 0)
+        PLOG(ERROR) << "SendInput failed (repeats are counted, not logged, until it recovers)";
+}
 
 //--------------------------------------------------------------------------------------------------
 void sendKeyboardScancode(WORD scancode, DWORD flags)
@@ -53,10 +80,7 @@ void sendKeyboardScancode(WORD scancode, DWORD flags)
     }
 
     // Do the keyboard event.
-    if (!SendInput(1, &input, sizeof(input)))
-    {
-        PLOG(ERROR) << "SendInput failed";
-    }
+    doSendInput(&input);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -71,10 +95,7 @@ void sendKeyboardVirtualKey(WORD key_code, DWORD flags)
     input.ki.wScan   = static_cast<WORD>(MapVirtualKeyW(key_code, MAPVK_VK_TO_VSC));
 
     // Do the keyboard event.
-    if (!SendInput(1, &input, sizeof(input)))
-    {
-        PLOG(ERROR) << "SendInput failed";
-    }
+    doSendInput(&input);
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -88,10 +109,7 @@ void sendKeyboardUnicodeChar(WORD unicode_char, DWORD flags)
     input.ki.wScan = unicode_char;
 
     // Do the keyboard event.
-    if (!SendInput(1, &input, sizeof(input)))
-    {
-        PLOG(ERROR) << "SendInput failed";
-    }
+    doSendInput(&input);
 }
 
 } // namespace
@@ -314,10 +332,7 @@ void InputInjectorWin::injectMouseEvent(const proto::desktop::MouseEvent& event)
     input.mi.dwFlags = flags;
 
     // Do the mouse event.
-    if (!SendInput(1, &input, sizeof(input)))
-    {
-        PLOG(ERROR) << "SendInput failed";
-    }
+    doSendInput(&input);
 
     last_mouse_mask_ = mask;
 }
