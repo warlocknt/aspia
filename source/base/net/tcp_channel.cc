@@ -764,6 +764,11 @@ void TcpChannel::doReadServiceData(size_t length)
             }
             else
             {
+                // read_buffer_.size() is signed (int on 32-bit builds) while the right-hand side is
+                // size_t, which the 32-bit compiler flags as a signed/unsigned mismatch (C4018). It is
+                // safe: the size is never negative, and header->length was already bounded to
+                // kMaxMessageSize by the length check on the read path (asserted above), so both sides
+                // are small positive values and the signed-to-unsigned conversion cannot wrap.
                 if (read_buffer_.size() < (sizeof(ServiceHeader) + header->length))
                 {
                     onErrorOccurred(FROM_HERE, ErrorCode::INVALID_PROTOCOL);
