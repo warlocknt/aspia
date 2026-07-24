@@ -551,6 +551,19 @@ bool ClipboardWin::onMessage(UINT message, WPARAM /* wParam */, LPARAM /* lParam
 //--------------------------------------------------------------------------------------------------
 void ClipboardWin::onClipboardUpdate()
 {
+    // Diagnostic (availability only, never content): exactly which formats the monitor sees the moment
+    // the clipboard changes. This settles a "host->client dropped the formatting/image" report - if
+    // HTML or the image formats read 0 right after rich content was copied, the format never reached
+    // the monitor at all (e.g. a SYSTEM agent not seeing a user application's delay-rendered formats),
+    // as opposed to being seen here and mishandled. IsClipboardFormatAvailable does not open the
+    // clipboard, so this adds no contention.
+    LOG(INFO) << "Clipboard update. Available: html="
+              << (html_format_ != 0 && IsClipboardFormatAvailable(html_format_) != FALSE)
+              << " unicode_text=" << (IsClipboardFormatAvailable(CF_UNICODETEXT) != FALSE)
+              << " dib=" << (IsClipboardFormatAvailable(CF_DIB) != FALSE)
+              << " bitmap=" << (IsClipboardFormatAvailable(CF_BITMAP) != FALSE)
+              << " hdrop=" << (IsClipboardFormatAvailable(CF_HDROP) != FALSE);
+
     // Formatted text wins when present: HTML carries the formatting the user copied, and a plain
     // text rendering rides along in the same event so a peer that cannot take HTML is downgraded to
     // text at the network boundary rather than here - this side stays peer-agnostic. A hiccup
