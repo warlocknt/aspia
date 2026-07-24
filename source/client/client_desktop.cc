@@ -29,6 +29,7 @@
 #include "base/desktop/mouse_cursor.h"
 #include "client/config_factory.h"
 #include "common/clipboard.h"
+#include "common/desktop_config_logging.h"
 #include "common/desktop_session_constants.h"
 
 namespace client {
@@ -182,6 +183,11 @@ void ClientDesktop::setDesktopConfig(const proto::desktop::Config& desktop_confi
     desktop_config_ = desktop_config;
 
     ConfigFactory::fixupDesktopConfig(&desktop_config_);
+
+    // The full session parameters in one line, so "why doesn't X work" (clipboard off, input blocked,
+    // ...) is answerable straight from the client log rather than by inference. The host logs the same
+    // line from its side in readConfig.
+    LOG(INFO) << "Session config (client): " << common::desktopConfigToString(desktop_config_);
 
     // If the session is not already running, then we do not need to send the configuration.
     if (!started_)

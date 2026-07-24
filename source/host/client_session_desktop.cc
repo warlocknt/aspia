@@ -29,6 +29,7 @@
 #include "base/desktop/mouse_cursor.h"
 #include "base/desktop/screen_capturer.h"
 #include "common/clipboard.h"
+#include "common/desktop_config_logging.h"
 #include "common/desktop_session_constants.h"
 #include "host/desktop_session_manager.h"
 #include "host/video_encode_worker.h"
@@ -643,16 +644,7 @@ void ClientSessionDesktop::readConfig(const proto::desktop::Config& config)
         (config.flags() & proto::desktop::CURSOR_POSITION);
 
     LOG(INFO) << "Client configuration changed";
-    LOG(INFO) << "Video encoding:" << config.video_encoding();
-    LOG(INFO) << "Enable cursor shape:"
-              << ((config.flags() & proto::desktop::ENABLE_CURSOR_SHAPE) != 0);
-    LOG(INFO) << "Disable font smoothing:" << desktop_session_config_.disable_font_smoothing;
-    LOG(INFO) << "Disable desktop effects:" << desktop_session_config_.disable_effects;
-    LOG(INFO) << "Disable desktop wallpaper:" << desktop_session_config_.disable_wallpaper;
-    LOG(INFO) << "Block input:" << desktop_session_config_.block_input;
-    LOG(INFO) << "Lock at disconnect:" << desktop_session_config_.lock_at_disconnect;
-    LOG(INFO) << "Clear clipboard:" << desktop_session_config_.clear_clipboard;
-    LOG(INFO) << "Cursor position:" << desktop_session_config_.cursor_position;
+    LOG(INFO) << "Session config (host): " << common::desktopConfigToString(config);
 
     emit sig_clientSessionConfigured();
 }

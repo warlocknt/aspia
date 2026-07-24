@@ -23,6 +23,8 @@ list(APPEND SOURCE_COMMON
     clipboard.h
     clipboard_monitor.cc
     clipboard_monitor.h
+    desktop_config_logging.cc
+    desktop_config_logging.h
     desktop_session_constants.cc
     desktop_session_constants.h
     file_capabilities.cc
