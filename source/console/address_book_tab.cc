@@ -454,6 +454,7 @@ void AddressBookTab::addComputerGroup()
     ComputerGroupDialog dialog(this,
                                ComputerGroupDialog::CreateComputerGroup,
                                parentName(parent_item),
+                               parent_item->defaultConfig(),
                                computer_group.get());
     if (dialog.exec() != QDialog::Accepted)
     {
@@ -484,7 +485,8 @@ void AddressBookTab::addComputer()
 
     ComputerDialog dialog(this,
                           ComputerDialog::Mode::CREATE,
-                          parentName(parent_item));
+                          parentName(parent_item),
+                          parent_item->defaultConfig());
     if (dialog.exec() != QDialog::Accepted)
     {
         LOG(INFO) << "[ACTION] Add computer rejected by user";
@@ -528,6 +530,7 @@ void AddressBookTab::copyComputer()
     ComputerDialog dialog(this,
                           ComputerDialog::Mode::COPY,
                           parentName(parent_group_item),
+                          parent_group_item->defaultConfig(),
                           *current_item->computer());
     if (dialog.exec() != QDialog::Accepted)
     {
@@ -615,6 +618,7 @@ void AddressBookTab::modifyComputerGroup()
     ComputerGroupDialog dialog(this,
                                ComputerGroupDialog::ModifyComputerGroup,
                                parentName(parent_item),
+                               parent_item->defaultConfig(),
                                computer_group);
     if (dialog.exec() != QDialog::Accepted)
     {
@@ -641,9 +645,17 @@ void AddressBookTab::modifyComputer()
         return;
     }
 
+    ComputerGroupItem* parent_group_item = current_item->parentComputerGroupItem();
+    if (!parent_group_item)
+    {
+        LOG(ERROR) << "Unable to get parent group item";
+        return;
+    }
+
     ComputerDialog dialog(this,
                           ComputerDialog::Mode::MODIFY,
-                          parentName(current_item->parentComputerGroupItem()),
+                          parentName(parent_group_item),
+                          parent_group_item->defaultConfig(),
                           *current_item->computer());
     if (dialog.exec() != QDialog::Accepted)
     {

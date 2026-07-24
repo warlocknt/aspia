@@ -51,6 +51,7 @@ enum ItemType
 ComputerGroupDialog::ComputerGroupDialog(QWidget* parent,
                                          Mode mode,
                                          const QString& parent_name,
+                                         const proto::address_book::ComputerGroupConfig& parent_config,
                                          proto::address_book::ComputerGroup* computer_group)
     : QDialog(parent),
       mode_(mode),
@@ -113,12 +114,38 @@ ComputerGroupDialog::ComputerGroupDialog(QWidget* parent,
     ComputerGroupDialogPortForwarding* port_forwarding_tab =
         new ComputerGroupDialogPortForwarding(ITEM_TYPE_PORT_FORWARDING, false, ui.widget);
 
-    general_tab->restoreSettings(computer_group_->config());
+    // What the tabs actually display. For every area whose "Inherit from parent" flag is set, show the
+    // RESOLVED PARENT value (what a member of this group will really use) instead of this group's own
+    // stored config, which for an inheriting group is a dormant, often empty copy. Mirrors the runtime
+    // resolution; saveChanges() keeps the own config intact for still-inherited areas. Same fix as in
+    // ComputerDialog - see the note there.
+    proto::address_book::ComputerGroupConfig display_config(computer_group_->config());
+    {
+        const proto::address_book::InheritConfig& inherit = display_config.inherit();
+
+        if (inherit.credentials())
+        {
+            display_config.set_username(parent_config.username());
+            display_config.set_password(parent_config.password());
+        }
+        if (inherit.desktop_manage())
+        {
+            display_config.mutable_session_config()->mutable_desktop_manage()->CopyFrom(
+                parent_config.session_config().desktop_manage());
+        }
+        if (inherit.desktop_view())
+        {
+            display_config.mutable_session_config()->mutable_desktop_view()->CopyFrom(
+                parent_config.session_config().desktop_view());
+        }
+    }
+
+    general_tab->restoreSettings(display_config);
     desktop_manage_tab->restoreSettings(
-        proto::peer::SESSION_TYPE_DESKTOP_MANAGE, computer_group_->config());
+        proto::peer::SESSION_TYPE_DESKTOP_MANAGE, display_config);
     desktop_view_tab->restoreSettings(
-        proto::peer::SESSION_TYPE_DESKTOP_VIEW, computer_group_->config());
-    port_forwarding_tab->restoreSettings(computer_group_->config());
+        proto::peer::SESSION_TYPE_DESKTOP_VIEW, display_config);
+    port_forwarding_tab->restoreSettings(display_config);
 
     tabs_.append(general_tab);
     tabs_.append(desktop_manage_tab);
@@ -267,6 +294,11 @@ bool ComputerGroupDialog::saveChanges()
         return false;
     }
 
+    // The tabs displayed the resolved parent values for inherited areas; keep this group's own config
+    // untouched for any area still inheriting, so viewing the dialog does not materialize the parent's
+    // values into it. Detached areas keep whatever the tab wrote.
+    const proto::address_book::ComputerGroupConfig own_before_save(computer_group_->config());
+
     for (auto it = tabs_.begin(), it_end = tabs_.end(); it != it_end; ++it)
     {
         QWidget* tab = *it;
@@ -302,6 +334,29 @@ bool ComputerGroupDialog::saveChanges()
                 static_cast<ComputerGroupDialogPortForwarding*>(tab);
 
             port_forwarding_tab->saveSettings(computer_group_->mutable_config());
+        }
+    }
+
+    // Restore the own config for areas still marked inherited (the tabs wrote the displayed parent
+    // values into them). The inherit flags come from the tabs and are kept as saved.
+    {
+        proto::address_book::ComputerGroupConfig* config = computer_group_->mutable_config();
+        const proto::address_book::InheritConfig& inherit = config->inherit();
+
+        if (inherit.credentials())
+        {
+            config->set_username(own_before_save.username());
+            config->set_password(own_before_save.password());
+        }
+        if (inherit.desktop_manage())
+        {
+            config->mutable_session_config()->mutable_desktop_manage()->CopyFrom(
+                own_before_save.session_config().desktop_manage());
+        }
+        if (inherit.desktop_view())
+        {
+            config->mutable_session_config()->mutable_desktop_view()->CopyFrom(
+                own_before_save.session_config().desktop_view());
         }
     }
 

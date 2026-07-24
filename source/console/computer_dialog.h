@@ -41,6 +41,7 @@ public:
     ComputerDialog(QWidget* parent,
                    Mode mode,
                    const QString& parent_name,
+                   const proto::address_book::ComputerGroupConfig& parent_config,
                    const std::optional<proto::address_book::Computer>& computer = std::nullopt);
     ~ComputerDialog() final;
 

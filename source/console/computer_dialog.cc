@@ -49,6 +49,7 @@ enum ItemType
 ComputerDialog::ComputerDialog(QWidget* parent,
                                Mode mode,
                                const QString& parent_name,
+                               const proto::address_book::ComputerGroupConfig& parent_config,
                                const std::optional<proto::address_book::Computer>& computer)
     : QDialog(parent),
       mode_(mode),
@@ -69,6 +70,35 @@ ComputerDialog::ComputerDialog(QWidget* parent,
     if (mode_ == Mode::COPY)
     {
         computer_.set_name(computer_.name() + ' ' + tr("(copy)").toStdString());
+    }
+
+    // What the tabs actually display. For every area whose "Inherit from parent" flag is set, the
+    // controls show the RESOLVED PARENT value (what the connection will really use), not this item's
+    // own stored config - which for an inheriting item is a dormant, often empty copy. Without this
+    // the dialog showed e.g. "clipboard off" under an inheriting node whose parent has it on, which
+    // is exactly the phantom that sent us hunting a non-existent bug. This mirrors the runtime
+    // resolution in ComputerItem::computerToConnect(); saveChanges() keeps the own config intact for
+    // still-inherited areas so merely viewing the dialog does not overwrite it with the parent's.
+    proto::address_book::Computer display_computer(computer_);
+    if (display_computer.has_inherit())
+    {
+        const proto::address_book::InheritConfig& inherit = display_computer.inherit();
+
+        if (inherit.credentials())
+        {
+            display_computer.set_username(parent_config.username());
+            display_computer.set_password(parent_config.password());
+        }
+        if (inherit.desktop_manage())
+        {
+            display_computer.mutable_session_config()->mutable_desktop_manage()->CopyFrom(
+                parent_config.session_config().desktop_manage());
+        }
+        if (inherit.desktop_view())
+        {
+            display_computer.mutable_session_config()->mutable_desktop_view()->CopyFrom(
+                parent_config.session_config().desktop_view());
+        }
     }
 
     restoreGeometry(settings_.computerDialogGeometry());
@@ -115,10 +145,10 @@ ComputerDialog::ComputerDialog(QWidget* parent,
     ComputerDialogPortForwarding* port_forwarding_tab =
         new ComputerDialogPortForwarding(ITEM_TYPE_PORT_FORWARDING, ui.widget);
 
-    general_tab->restoreSettings(parent_name, computer_);
-    desktop_manage_tab->restoreSettings(proto::peer::SESSION_TYPE_DESKTOP_MANAGE, computer_);
-    desktop_view_tab->restoreSettings(proto::peer::SESSION_TYPE_DESKTOP_VIEW, computer_);
-    port_forwarding_tab->restoreSettings(computer_);
+    general_tab->restoreSettings(parent_name, display_computer);
+    desktop_manage_tab->restoreSettings(proto::peer::SESSION_TYPE_DESKTOP_MANAGE, display_computer);
+    desktop_view_tab->restoreSettings(proto::peer::SESSION_TYPE_DESKTOP_VIEW, display_computer);
+    port_forwarding_tab->restoreSettings(display_computer);
 
     tabs_.append(general_tab);
     tabs_.append(desktop_manage_tab);
@@ -236,6 +266,12 @@ void ComputerDialog::showTab(int type)
 //--------------------------------------------------------------------------------------------------
 bool ComputerDialog::saveChanges()
 {
+    // The tabs displayed the resolved parent values for inherited areas, so a plain save would write
+    // those into this item's own config. Keep the own config untouched for any area still inheriting,
+    // so opening and OK-ing an inheriting item does not silently materialize the parent's values into
+    // it. Areas the user detached (unchecked inherit) keep whatever the tab wrote.
+    const proto::address_book::Computer own_before_save(computer_);
+
     for (auto it = tabs_.begin(), it_end = tabs_.end(); it != it_end; ++it)
     {
         QWidget* tab = *it;
@@ -262,6 +298,29 @@ bool ComputerDialog::saveChanges()
             ComputerDialogPortForwarding* port_forwarding_tab =
                 static_cast<ComputerDialogPortForwarding*>(tab);
             port_forwarding_tab->saveSettings(&computer_);
+        }
+    }
+
+    // Restore the own config for areas still marked inherited (the tabs wrote the displayed parent
+    // values into them). The inherit flags themselves come from the tabs and are kept as saved.
+    if (computer_.has_inherit())
+    {
+        const proto::address_book::InheritConfig& inherit = computer_.inherit();
+
+        if (inherit.credentials())
+        {
+            computer_.set_username(own_before_save.username());
+            computer_.set_password(own_before_save.password());
+        }
+        if (inherit.desktop_manage())
+        {
+            computer_.mutable_session_config()->mutable_desktop_manage()->CopyFrom(
+                own_before_save.session_config().desktop_manage());
+        }
+        if (inherit.desktop_view())
+        {
+            computer_.mutable_session_config()->mutable_desktop_view()->CopyFrom(
+                own_before_save.session_config().desktop_view());
         }
     }
 

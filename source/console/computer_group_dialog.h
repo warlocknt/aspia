@@ -35,6 +35,7 @@ public:
     ComputerGroupDialog(QWidget* parent,
                         Mode mode,
                         const QString& parent_name,
+                        const proto::address_book::ComputerGroupConfig& parent_config,
                         proto::address_book::ComputerGroup* computer_group);
     ~ComputerGroupDialog() final;
 
