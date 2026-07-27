@@ -85,6 +85,15 @@ void ClientDesktop::onSessionStarted()
     clipboard_monitor_->start();
 
     audio_player_ = base::AudioPlayer::create();
+    if (!audio_player_)
+    {
+        // No usable audio output on this machine (e.g. a headless console, or no sound device). Ask
+        // the host to stop sending audio rather than have it capture, Opus-encode and stream packets
+        // we would only drop - that wastes the host's CPU and the link for nothing. The host resumes
+        // if the user later turns playback back on from the toolbar.
+        LOG(WARNING) << "No audio output device; requesting the host to pause audio";
+        setAudioPause(true);
+    }
 }
 
 //--------------------------------------------------------------------------------------------------
