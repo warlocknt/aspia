@@ -136,8 +136,14 @@ const Frame* ScreenCapturerGdi::captureFrame(Error* error)
     screen_rect_ = ScreenCaptureUtils::screenRect(current_screen_id_, current_device_key_);
     if (screen_rect_.isEmpty())
     {
-        LOG(ERROR) << "Failed to get screen rect";
-        *error = Error::PERMANENT;
+        // TEMPORARY, not PERMANENT. On a desktop/session switch (lock, the Winlogon/login secure
+        // desktop) EnumDisplayDevices can briefly return failure with no error set - a transient the
+        // display stack clears within about a second. Treating it as PERMANENT tore the capturer down
+        // and it never recovered until the client reconnected (observed as a frozen picture after
+        // locking a Windows 7 host). As TEMPORARY the capture loop simply retries the next frame and
+        // resumes on its own once the enumeration succeeds again.
+        LOG(ERROR) << "Failed to get screen rect (will retry)";
+        *error = Error::TEMPORARY;
         return nullptr;
     }
 

@@ -193,7 +193,14 @@ Rect ScreenCaptureUtils::screenRect(ScreenCapturer::ScreenId screen,
     device.cb = sizeof(device);
     if (!EnumDisplayDevicesW(nullptr, static_cast<DWORD>(screen), &device, 0))
     {
-        PLOG(ERROR) << "EnumDisplayDevicesW failed";
+        // During a desktop/session switch this returns false with no error set (GetLastError() == 0),
+        // a transient the display stack clears within about a second. Say so plainly instead of
+        // logging "failed: operation completed successfully (0)", which reads like a real error and
+        // sent a real investigation chasing it. The caller retries either way.
+        if (GetLastError() == ERROR_SUCCESS)
+            LOG(WARNING) << "EnumDisplayDevicesW returned false with no error (transient, will retry)";
+        else
+            PLOG(ERROR) << "EnumDisplayDevicesW failed";
         return Rect();
     }
 

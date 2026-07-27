@@ -195,7 +195,7 @@ void DesktopResizerWin::Screen::updateBestModeForResolution(
     {
         LOG(INFO) << "Ignoring mode" << candidate_mode.dmPelsWidth << "x"
                   << candidate_mode.dmPelsHeight << ": mismatched BPP: expected"
-                  << current_mode.dmFields << "but got" << current_mode.dmFields;
+                  << current_mode.dmBitsPerPel << "but got" << candidate_mode.dmBitsPerPel;
         return;
     }
 
