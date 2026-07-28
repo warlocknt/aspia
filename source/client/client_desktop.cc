@@ -85,15 +85,11 @@ void ClientDesktop::onSessionStarted()
     clipboard_monitor_->start();
 
     audio_player_ = base::AudioPlayer::create();
-    if (!audio_player_)
-    {
-        // No usable audio output on this machine (e.g. a headless console, or no sound device). Ask
-        // the host to stop sending audio rather than have it capture, Opus-encode and stream packets
-        // we would only drop - that wastes the host's CPU and the link for nothing. The host resumes
-        // if the user later turns playback back on from the toolbar.
-        LOG(WARNING) << "No audio output device; requesting the host to pause audio";
-        setAudioPause(true);
-    }
+    // If there is no audio output device we ask the host to pause audio - but NOT here. onSessionStarted
+    // runs before the channel is switched to carrying session messages (Client does setChannelIdSupport()
+    // and resume() only after this returns), so a send here goes out mis-framed and the host drops the
+    // connection with ACCESS_DENIED. The request is deferred to readCapabilities(), the first point where
+    // sending a session extension is safe.
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -552,6 +548,16 @@ void ClientDesktop::readCapabilities(const proto::desktop::Capabilities& capabil
         extension->set_name(common::kClipboardZstdExtension);
 
         sendMessage(outgoing_message_.serialize());
+    }
+
+    // The channel now carries session messages, so it is safe to send. If this machine has no audio
+    // output (detected at session start), ask the host to stop sending audio we could only drop -
+    // sparing its CPU and the link. Sent here rather than in onSessionStarted, where it would go out
+    // before the channel was ready and the host would drop the connection.
+    if (!audio_player_)
+    {
+        LOG(WARNING) << "No audio output device; requesting the host to pause audio";
+        setAudioPause(true);
     }
 
     // We notify the window about changes in the list of extensions and video encodings.
