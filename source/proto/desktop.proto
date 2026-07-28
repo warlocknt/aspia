@@ -157,6 +157,11 @@ message ClipboardEvent
     // network boundary by replacing the event with this text, so nothing is lost - only the
     // formatting. Endpoints that accept HTML ignore this and derive their own plain text on paste.
     bytes text_fallback = 3;
+
+    // When true, |data| and |text_fallback| are zstd-compressed (base::ZstdCompress) and must be
+    // decompressed before use. Only ever set toward a peer that negotiated the clipboard_zstd
+    // extension, and only when compression actually shrank the payload, so an old peer never sees it.
+    bool compressed = 4;
 }
 
 message CursorShape

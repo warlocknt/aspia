@@ -149,6 +149,10 @@ private:
     // text carried alongside a formatted event instead of the HTML.
     bool host_supports_clipboard_html_ = false;
 
+    // Whether the host declared the clipboard_zstd extension. Only then are outgoing clipboard
+    // payloads zstd-compressed toward it.
+    bool host_supports_clipboard_zstd_ = false;
+
     std::shared_ptr<base::Frame> desktop_frame_;
     proto::desktop::Config desktop_config_;
 

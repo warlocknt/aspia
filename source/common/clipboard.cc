@@ -19,10 +19,15 @@
 #include "common/clipboard.h"
 
 #include "base/logging.h"
+#include "base/codec/zstd_compress.h"
 
 namespace common {
 
 namespace {
+
+// zstd level for clipboard payloads. Higher than the file-transfer path's level 1: clipboard events
+// are small and infrequent, so the extra ratio on text/HTML is worth the negligible CPU.
+const int kClipboardCompressionLevel = 3;
 
 // A message that does not fit into base::NetworkChannel::kMaxMessageSize (7 MB) is not merely
 // refused: the channel reports INVALID_PROTOCOL and the connection is dropped. Copying a large
@@ -40,6 +45,35 @@ const size_t kMaxClipboardDataSize = 4 * 1024 * 1024; // 4 MB
 const QString Clipboard::kMimeTypeTextUtf8 = QStringLiteral("text/plain; charset=UTF-8");
 const QString Clipboard::kMimeTypeTextHtml = QStringLiteral("text/html");
 const QString Clipboard::kMimeTypeImagePng = QStringLiteral("image/png");
+
+//--------------------------------------------------------------------------------------------------
+void compressClipboardEvent(proto::desktop::ClipboardEvent* event)
+{
+    if (event->compressed())
+        return;
+
+    // Adaptive: keep the compressed form only when it is actually smaller. Text and HTML shrink a lot;
+    // an already-compressed PNG does not and is left untouched. The compressed flag covers the whole
+    // event, so data and text_fallback are packed together or not at all.
+    QByteArray data(event->data().data(), static_cast<int>(event->data().size()));
+    QByteArray packed = base::ZstdCompress::compress(data, kClipboardCompressionLevel);
+    if (packed.isEmpty() || packed.size() >= data.size())
+        return;
+
+    event->set_data(packed.constData(), static_cast<size_t>(packed.size()));
+
+    if (!event->text_fallback().empty())
+    {
+        QByteArray text_fallback(event->text_fallback().data(),
+                                 static_cast<int>(event->text_fallback().size()));
+        QByteArray packed_fallback =
+            base::ZstdCompress::compress(text_fallback, kClipboardCompressionLevel);
+        event->set_text_fallback(packed_fallback.constData(),
+                                 static_cast<size_t>(packed_fallback.size()));
+    }
+
+    event->set_compressed(true);
+}
 
 //--------------------------------------------------------------------------------------------------
 Clipboard::Clipboard(QObject* parent)
@@ -99,12 +133,43 @@ void Clipboard::start()
 //--------------------------------------------------------------------------------------------------
 void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event)
 {
+    // Decompress first when the sender used zstd (only ever toward a peer that negotiated it), so the
+    // size check and everything downstream see the real, uncompressed bytes. ZstdCompress caps its
+    // output at 64 MB internally, and the 4 MB clipboard limit below still applies to the result, so a
+    // tiny compressed blob cannot expand into something oversized.
+    QByteArray data;
+    QByteArray text_fallback;
+
+    if (event.compressed())
+    {
+        std::string decompressed = base::ZstdCompress::decompress(event.data());
+        if (decompressed.empty() && !event.data().empty())
+        {
+            LOG(ERROR) << "Unable to decompress clipboard data of" << event.data().size() << "bytes";
+            return;
+        }
+        data = QByteArray(decompressed.data(), static_cast<int>(decompressed.size()));
+
+        if (!event.text_fallback().empty())
+        {
+            std::string decompressed_fallback = base::ZstdCompress::decompress(event.text_fallback());
+            text_fallback = QByteArray(decompressed_fallback.data(),
+                                       static_cast<int>(decompressed_fallback.size()));
+        }
+    }
+    else
+    {
+        data = QByteArray(event.data().data(), static_cast<int>(event.data().size()));
+        text_fallback =
+            QByteArray(event.text_fallback().data(), static_cast<int>(event.text_fallback().size()));
+    }
+
     // The channel already refuses anything above its own limit, so this is a sanity check rather
     // than a defence: it keeps a peer built from different sources from filling the local clipboard
     // with something this side would never agree to send.
-    if (event.data().size() > kMaxClipboardDataSize)
+    if (static_cast<size_t>(data.size()) > kMaxClipboardDataSize)
     {
-        LOG(WARNING) << "Received clipboard data is too large:" << event.data().size()
+        LOG(WARNING) << "Received clipboard data is too large:" << data.size()
                      << "bytes (limit" << kMaxClipboardDataSize << "). Ignored.";
         if (stats_)
             ++stats_->oversized;
@@ -125,14 +190,11 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
     // Remembered before it is applied: putting it on the clipboard raises a change notification,
     // and without this the content would be sent straight back to the side it came from.
     last_mime_type_ = mime_type;
-
-    // The size was checked against kMaxClipboardDataSize above, so it fits the int this takes.
-    last_data_ = QByteArray(event.data().data(), static_cast<int>(event.data().size()));
+    last_data_ = data;
 
     // Plain text the sender computed for this formatted content. The platform layer uses it as the
     // plain-text side of the paste rather than parsing the HTML itself. Empty for text and images.
-    injected_text_fallback_ =
-        QByteArray(event.text_fallback().data(), static_cast<int>(event.text_fallback().size()));
+    injected_text_fallback_ = text_fallback;
 
     if (stats_)
     {
@@ -201,6 +263,10 @@ void Clipboard::onData(const QString& mime_type, const QByteArray& data,
     if (!text_fallback.isEmpty())
         event.set_text_fallback(text_fallback.constData(), static_cast<size_t>(text_fallback.size()));
 
+    // The event goes out uncompressed here; the network boundary (ClientDesktop / ClientSessionDesktop)
+    // compresses it via compressClipboardEvent() when the peer negotiated clipboard_zstd. Compressing
+    // there rather than in this worker keeps the decision where the peer's capabilities are known - the
+    // host's clipboard lives in a separate agent process that does not see them.
     emit sig_clipboardEvent(event);
 }
 

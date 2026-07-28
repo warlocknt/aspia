@@ -44,10 +44,15 @@ const char kClipboardImageExtension[] = "clipboard_image";
 // nothing is lost, only the formatting. Each side prefers HTML only once the other has declared it.
 const char kClipboardHtmlExtension[] = "clipboard_html";
 
+// Zstd compression of clipboard payloads (ClipboardEvent.compressed). Negotiated like the two above:
+// a side compresses only toward a peer that lists this extension, so an old peer always gets the raw
+// bytes. Adaptive - already-compressed content (PNG) is sent uncompressed regardless.
+const char kClipboardZstdExtension[] = "clipboard_zstd";
+
 #if defined(Q_OS_WINDOWS)
 const char kSupportedExtensionsForManage[] =
     "select_screen;preferred_size;power_control;remote_update;system_info;video_recording;"
-    "task_manager;video_pause;audio_pause;screen_type;clipboard_image;clipboard_html";
+    "task_manager;video_pause;audio_pause;screen_type;clipboard_image;clipboard_html;clipboard_zstd";
 
 const char kSupportedExtensionsForView[] =
     "select_screen;preferred_size;system_info;video_recording;video_pause;audio_pause;screen_type";

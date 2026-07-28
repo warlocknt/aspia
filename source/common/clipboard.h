@@ -76,6 +76,13 @@ struct ClipboardStats
     }
 };
 
+// Zstd-compresses a clipboard event's payload in place, adaptively: |data| (and |text_fallback|, if
+// present) are packed together and the compressed flag set only when compression actually shrank the
+// data - an already-compressed PNG is left as-is. Called at the network boundary only toward a peer
+// that negotiated the clipboard_zstd extension. The receiving side decompresses in
+// Clipboard::injectClipboardEvent by the flag alone. No-op if the event is already compressed.
+void compressClipboardEvent(proto::desktop::ClipboardEvent* event);
+
 class Clipboard : public QObject
 {
     Q_OBJECT

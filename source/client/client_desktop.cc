@@ -172,16 +172,21 @@ void ClientDesktop::onClipboardEvent(const proto::desktop::ClipboardEvent& event
     {
         LOG(INFO) << "Clipboard HTML downgraded to text: host does not support HTML";
 
-        proto::desktop::ClipboardEvent text_event;
-        text_event.set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
-        text_event.set_data(event.text_fallback());
+        proto::desktop::ClipboardEvent* text_event =
+            outgoing_message_.newMessage().mutable_clipboard_event();
+        text_event->set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
+        text_event->set_data(event.text_fallback());
+        if (host_supports_clipboard_zstd_)
+            common::compressClipboardEvent(text_event);
 
-        outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(text_event);
         sendMessage(outgoing_message_.serialize());
         return;
     }
 
-    outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
+    proto::desktop::ClipboardEvent* outgoing = outgoing_message_.newMessage().mutable_clipboard_event();
+    outgoing->CopyFrom(event);
+    if (host_supports_clipboard_zstd_)
+        common::compressClipboardEvent(outgoing);
     sendMessage(outgoing_message_.serialize());
 }
 
@@ -532,6 +537,19 @@ void ClientDesktop::readCapabilities(const proto::desktop::Capabilities& capabil
         // old host never sees it.
         proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
         extension->set_name(common::kClipboardHtmlExtension);
+
+        sendMessage(outgoing_message_.serialize());
+    }
+
+    host_supports_clipboard_zstd_ = extensions.contains(common::kClipboardZstdExtension);
+    LOG(INFO) << "Host supports clipboard zstd:" << host_supports_clipboard_zstd_;
+
+    if (host_supports_clipboard_zstd_)
+    {
+        // Announce that this client also decompresses clipboard payloads, so the host may zstd-pack
+        // what it sends us. As above, only once the host has declared it, so an old host never sees it.
+        proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
+        extension->set_name(common::kClipboardZstdExtension);
 
         sendMessage(outgoing_message_.serialize());
     }

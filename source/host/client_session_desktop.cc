@@ -501,17 +501,23 @@ void ClientSessionDesktop::injectClipboardEvent(const proto::desktop::ClipboardE
         {
             LOG(INFO) << "Clipboard HTML downgraded to text: client does not support HTML";
 
-            proto::desktop::ClipboardEvent text_event;
-            text_event.set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
-            text_event.set_data(event.text_fallback());
+            proto::desktop::ClipboardEvent* text_event =
+                outgoing_message_.newMessage().mutable_clipboard_event();
+            text_event->set_mime_type(common::Clipboard::kMimeTypeTextUtf8.toStdString());
+            text_event->set_data(event.text_fallback());
+            if (client_supports_clipboard_zstd_)
+                common::compressClipboardEvent(text_event);
 
-            outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(text_event);
             sendMessage(outgoing_message_.serialize());
             stat_counter_.addOutgoingClipboardEvent();
             return;
         }
 
-        outgoing_message_.newMessage().mutable_clipboard_event()->CopyFrom(event);
+        proto::desktop::ClipboardEvent* outgoing =
+            outgoing_message_.newMessage().mutable_clipboard_event();
+        outgoing->CopyFrom(event);
+        if (client_supports_clipboard_zstd_)
+            common::compressClipboardEvent(outgoing);
         sendMessage(outgoing_message_.serialize());
         stat_counter_.addOutgoingClipboardEvent();
     }
@@ -557,6 +563,13 @@ void ClientSessionDesktop::readExtension(const proto::desktop::Extension& extens
         // old client never sends it and is downgraded to plain text.
         LOG(INFO) << "Client supports clipboard HTML";
         client_supports_clipboard_html_ = true;
+    }
+    else if (extension.name() == common::kClipboardZstdExtension)
+    {
+        // Announced only after the client has seen the extension in our capabilities, so an old
+        // client never sends it and always receives raw, uncompressed clipboard payloads.
+        LOG(INFO) << "Client supports clipboard zstd";
+        client_supports_clipboard_zstd_ = true;
     }
     else if (extension.name() == common::kPowerControlExtension)
     {
