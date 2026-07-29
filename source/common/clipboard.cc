@@ -21,6 +21,8 @@
 #include "base/logging.h"
 #include "base/codec/zstd_compress.h"
 
+#include <chrono>
+
 namespace common {
 
 namespace {
@@ -40,6 +42,11 @@ const int kClipboardCompressionLevel = 3;
 // this constant to details that are free to change.
 const size_t kMaxClipboardDataSize = 4 * 1024 * 1024; // 4 MB
 
+// Compression is only interesting to measure where it can actually pay for itself. Below this the
+// transfer is dominated by the round trip rather than the payload, and logging every copied word
+// would bury the log for no insight. Sizes and formats only - never the content itself.
+const int kSizeLogThreshold = 16 * 1024; // 16 KB
+
 } // namespace
 
 const QString Clipboard::kMimeTypeTextUtf8 = QStringLiteral("text/plain; charset=UTF-8");
@@ -56,9 +63,34 @@ void compressClipboardEvent(proto::desktop::ClipboardEvent* event)
     // an already-compressed PNG does not and is left untouched. The compressed flag covers the whole
     // event, so data and text_fallback are packed together or not at all.
     QByteArray data(event->data().data(), static_cast<int>(event->data().size()));
+
+    const std::chrono::steady_clock::time_point started = std::chrono::steady_clock::now();
     QByteArray packed = base::ZstdCompress::compress(data, kClipboardCompressionLevel);
+    const int elapsed_ms = static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::steady_clock::now() - started).count());
+
     if (packed.isEmpty() || packed.size() >= data.size())
+    {
+        // Worth knowing: it means this format is spending CPU for nothing and the payload goes out
+        // at full size anyway (an already-compressed image, typically).
+        if (data.size() >= kSizeLogThreshold)
+        {
+            LOG(INFO) << "Clipboard not compressed, no gain."
+                      << "Type:" << event->mime_type().c_str()
+                      << "size:" << data.size() << "bytes"
+                      << "(took" << elapsed_ms << "ms)";
+        }
         return;
+    }
+
+    if (data.size() >= kSizeLogThreshold)
+    {
+        LOG(INFO) << "Clipboard compressed."
+                  << "Type:" << event->mime_type().c_str()
+                  << "size:" << data.size() << "->" << packed.size() << "bytes"
+                  << "(saved" << (100 - (100LL * packed.size() / data.size())) << "%, took"
+                  << elapsed_ms << "ms, level" << kClipboardCompressionLevel << ")";
+    }
 
     event->set_data(packed.constData(), static_cast<size_t>(packed.size()));
 
@@ -149,6 +181,16 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
             return;
         }
         data = QByteArray(decompressed.data(), static_cast<int>(decompressed.size()));
+
+        // The receiving half of the measurement: what actually crossed the wire against what the
+        // clipboard really holds. Logged from the size the sender put on the wire, so a run can be
+        // read from either side's log alone.
+        if (data.size() >= kSizeLogThreshold)
+        {
+            LOG(INFO) << "Clipboard decompressed."
+                      << "Type:" << event.mime_type().c_str()
+                      << "size:" << event.data().size() << "->" << data.size() << "bytes";
+        }
 
         if (!event.text_fallback().empty())
         {
