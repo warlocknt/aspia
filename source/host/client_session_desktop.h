@@ -24,6 +24,7 @@
 
 #include "base/serialization.h"
 #include "base/desktop/geometry.h"
+#include "base/desktop/region.h"
 #include "host/client_session.h"
 #include "host/desktop_session.h"
 #include "host/stat_counter.h"
@@ -115,6 +116,12 @@ private:
     // than they can be encoded. Real-time semantics: drop frames instead of queueing them, the next
     // capture carries fresher content anyway.
     bool encode_in_flight_ = false;
+
+    // Areas that changed in frames we dropped and therefore never sent. The capturer diffs each
+    // frame against the previous CAPTURED one, not against what the client last received, so a
+    // dropped frame is the only carrier of its own changes - without carrying them over they are
+    // never sent again until something happens to change those pixels a second time.
+    base::Region pending_update_region_;
     DesktopSession::Config desktop_session_config_;
     base::Size source_size_;
     base::Size preferred_size_;

@@ -302,15 +302,32 @@ void ClientSessionDesktop::onTaskManagerMessage(const proto::task_manager::HostT
 //--------------------------------------------------------------------------------------------------
 void ClientSessionDesktop::encodeScreen(const base::Frame* frame, const base::MouseCursor* cursor)
 {
+    // Dropping a frame must not drop what it was carrying. The capturer computes the dirty region
+    // against the previous captured frame, so whatever changed in a frame we skip is never offered
+    // again until those pixels change once more. Remember the region and hand it to the next frame
+    // that does get encoded. Without this, locking the host - the whole screen changing at once and
+    // then going completely static - leaves stale islands of the old desktop on the client forever.
+    auto skip_frame = [this](const base::Frame* skipped)
+    {
+        if (skipped)
+            pending_update_region_.addRegion(skipped->constUpdatedRegion());
+    };
+
     if (critical_overflow_)
+    {
+        skip_frame(frame);
         return;
+    }
 
     // The worker is still busy with the previous frame. Drop this one instead of queueing it: the
     // capture is no longer throttled by the encoder, so queueing would grow without bound (each
     // queued item holds a full frame copy) and add minutes of latency. The next capture will carry
     // fresher content.
     if (encode_in_flight_)
+    {
+        skip_frame(frame);
         return;
+    }
 
     std::shared_ptr<base::Frame> frame_copy;
     int target_width = 0;
@@ -324,6 +341,10 @@ void ClientSessionDesktop::encodeScreen(const base::Frame* frame, const base::Mo
             source_size_ = frame->size();
             preferred_size_ = base::Size();
             forced_size_ = base::Size();
+
+            // Carried-over areas are in the old frame's coordinates and mean nothing now. The
+            // capturer sends a full update for the first frame of a new size anyway.
+            pending_update_region_.clear();
         }
 
         base::Size current_size = preferred_size_;
@@ -361,6 +382,15 @@ void ClientSessionDesktop::encodeScreen(const base::Frame* frame, const base::Mo
         // Copy the frame out of the shared-memory capture buffer so the worker thread can read it
         // safely after this capture is acknowledged.
         frame_copy = copyFrame(frame);
+
+        // This frame carries current pixels for the areas the dropped frames changed, so sending
+        // them now is both correct and the only chance the client gets to see them.
+        if (frame_copy && !pending_update_region_.isEmpty())
+        {
+            frame_copy->updatedRegion()->addRegion(pending_update_region_);
+            pending_update_region_.clear();
+        }
+
         target_width = current_size.width();
         target_height = current_size.height();
     }
