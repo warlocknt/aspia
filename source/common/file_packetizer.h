@@ -52,6 +52,13 @@ private:
     quint64 file_size_ = 0;
     quint64 left_size_ = 0;
 
+    // What compression actually bought on this file. Per-chunk logging would be unreadable at the
+    // packet rate, so the numbers are accumulated and reported once, when the file is finished.
+    quint64 raw_bytes_ = 0;
+    quint64 wire_bytes_ = 0;
+    int compressed_chunks_ = 0;
+    int raw_chunks_ = 0;
+
     Q_DISABLE_COPY(FilePacketizer)
 };
 

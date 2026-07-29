@@ -46,6 +46,13 @@ private:
     quint64 file_size_ = 0;
     quint64 left_size_ = 0;
 
+    // The receiving half of the compression measurement: what arrived against what was written.
+    // Accumulated per file and reported once, when the last packet lands.
+    quint64 wire_bytes_ = 0;
+    quint64 written_bytes_ = 0;
+    int compressed_chunks_ = 0;
+    int raw_chunks_ = 0;
+
     Q_DISABLE_COPY(FileDepacketizer)
 };
 

@@ -30,6 +30,10 @@ namespace {
 // the network IO thread, and the point is to spend less on the wire, not to squeeze every last byte.
 const int kCompressionLevel = 1;
 
+// Below this a file crosses in a packet or two and the ratio says nothing useful, while a folder of
+// small files would produce a line each and drown the log.
+const quint64 kSizeLogThreshold = 1024 * 1024; // 1 MB
+
 } // namespace
 
 //--------------------------------------------------------------------------------------------------
@@ -107,6 +111,14 @@ std::unique_ptr<proto::file_transfer::Packet> FilePacketizer::readNextPacket(
     if (!sent_compressed)
         *packet->mutable_data() = std::move(chunk);
 
+    raw_bytes_ += packet_buffer_size;
+    wire_bytes_ += packet->data().size();
+
+    if (sent_compressed)
+        ++compressed_chunks_;
+    else
+        ++raw_chunks_;
+
     if (left_size_ == file_size_)
     {
         packet->set_flags(packet->flags() | proto::file_transfer::Packet::FIRST_PACKET);
@@ -121,6 +133,16 @@ std::unique_ptr<proto::file_transfer::Packet> FilePacketizer::readNextPacket(
 
     if (!left_size_)
     {
+        // One line per file, and only for files large enough for the ratio to mean anything. The
+        // chunk split tells apart "this file does not compress" from "compression was off": a file
+        // sent entirely raw with compression enabled is simply incompressible content.
+        if (raw_bytes_ >= kSizeLogThreshold)
+        {
+            LOG(INFO) << "File sent." << "Size:" << raw_bytes_ << "->" << wire_bytes_ << "bytes"
+                      << "(saved" << (100 - (100 * wire_bytes_ / raw_bytes_)) << "%, chunks:"
+                      << compressed_chunks_ << "compressed," << raw_chunks_ << "raw)";
+        }
+
         file_size_ = 0;
         file_->close();
 

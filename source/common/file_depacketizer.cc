@@ -23,6 +23,14 @@
 
 namespace common {
 
+namespace {
+
+// Matches the sender's threshold: below this the ratio says nothing useful, and a folder of small
+// files would produce a line each.
+const quint64 kSizeLogThreshold = 1024 * 1024; // 1 MB
+
+} // namespace
+
 //--------------------------------------------------------------------------------------------------
 FileDepacketizer::FileDepacketizer(const QString& file_path, std::unique_ptr<QFile> file)
     : file_path_(file_path),
@@ -130,8 +138,24 @@ bool FileDepacketizer::writeNextPacket(const proto::file_transfer::Packet& packe
 
     left_size_ -= packet_size;
 
+    wire_bytes_ += packet.data().size();
+    written_bytes_ += packet_size;
+
+    if (packet.flags() & proto::file_transfer::Packet::COMPRESSED_ZSTD)
+        ++compressed_chunks_;
+    else
+        ++raw_chunks_;
+
     if (packet.flags() & proto::file_transfer::Packet::LAST_PACKET)
     {
+        if (written_bytes_ >= kSizeLogThreshold)
+        {
+            LOG(INFO) << "File received." << "Size:" << wire_bytes_ << "->" << written_bytes_
+                      << "bytes" << "(saved" << (100 - (100 * wire_bytes_ / written_bytes_))
+                      << "%, chunks:" << compressed_chunks_ << "compressed," << raw_chunks_
+                      << "raw)";
+        }
+
         file_size_ = 0;
         file_->close();
     }
