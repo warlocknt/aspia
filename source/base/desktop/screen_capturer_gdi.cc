@@ -26,6 +26,8 @@
 #include "base/desktop/differ.h"
 #include "base/win/scoped_select_object.h"
 
+#include <algorithm>
+
 #include <dwmapi.h>
 
 namespace base {
@@ -38,6 +40,45 @@ bool isSameCursorShape(const CURSORINFO& left, const CURSORINFO& right)
     // If the cursors are not showing, we do not care the hCursor handle.
     return left.flags == right.flags && (left.flags != CURSOR_SHOWING ||
                                          left.hCursor == right.hCursor);
+}
+
+//--------------------------------------------------------------------------------------------------
+// Tells an all-black capture from a real (possibly static) screen. BitBlt reports success either
+// way, so this is the only way to see in the log which of the two the operator is looking at.
+// Walking a full frame would be ~8 MB per capture, so probe a sparse grid instead - a screen with
+// any content at all lights up several probes.
+bool isFrameBlank(const Frame* frame)
+{
+    static const int kProbesPerAxis = 64;
+
+    const quint8* data = frame->frameData();
+    if (!data)
+        return false;
+
+    const int width = frame->size().width();
+    const int height = frame->size().height();
+
+    if (width <= 0 || height <= 0)
+        return false;
+
+    const int step_x = std::max(1, width / kProbesPerAxis);
+    const int step_y = std::max(1, height / kProbesPerAxis);
+
+    for (int y = 0; y < height; y += step_y)
+    {
+        const quint8* row = data + (static_cast<ptrdiff_t>(y) * frame->stride());
+
+        for (int x = 0; x < width; x += step_x)
+        {
+            const quint8* pixel = row + (static_cast<ptrdiff_t>(x) * 4);
+
+            // BitBlt does not set the alpha channel, so only the color components are meaningful.
+            if (pixel[0] || pixel[1] || pixel[2])
+                return false;
+        }
+    }
+
+    return true;
 }
 
 } // namespace
@@ -130,6 +171,10 @@ const Frame* ScreenCapturerGdi::captureFrame(Error* error)
     queue_.moveToNextFrame();
     *error = Error::TEMPORARY;
 
+    // Reported here rather than at the end of the method so that the summary keeps coming out even
+    // while every capture is failing - the silence would otherwise look the same as a stopped loop.
+    reportCaptureDiagnostics();
+
     if (!prepareCaptureResources())
         return nullptr;
 
@@ -142,7 +187,15 @@ const Frame* ScreenCapturerGdi::captureFrame(Error* error)
         // and it never recovered until the client reconnected (observed as a frozen picture after
         // locking a Windows 7 host). As TEMPORARY the capture loop simply retries the next frame and
         // resumes on its own once the enumeration succeeds again.
-        LOG(ERROR) << "Failed to get screen rect (will retry)";
+        // Throttled: the capture loop runs at the session FPS, so an unbroken failure streak would
+        // otherwise write this line dozens of times per second.
+        if (screen_rect_failures_ == 0)
+        {
+            LOG(ERROR) << "Failed to get screen rect (will retry, repeats are counted)";
+        }
+
+        ++screen_rect_failures_;
+
         *error = Error::TEMPORARY;
         return nullptr;
     }
@@ -188,6 +241,7 @@ const Frame* ScreenCapturerGdi::captureFrame(Error* error)
             if (++count > 10)
                 count = 0;
 
+            ++bitblt_failures_;
             return nullptr;
         }
     }
@@ -204,6 +258,35 @@ const Frame* ScreenCapturerGdi::captureFrame(Error* error)
         differ_->calcDirtyRegion(previous->frameData(),
                                  current->frameData(),
                                  current->updatedRegion());
+    }
+
+    ++captured_frames_;
+
+    if (current->updatedRegion()->isEmpty())
+        ++unchanged_frames_;
+
+    // The signature we are hunting: BitBlt succeeds, the frame is entirely black and nothing ever
+    // changes in it, so no packet is sent and the operator stares at a frozen black screen while
+    // the log claims everything is fine.
+    const bool is_blank = isFrameBlank(current);
+    if (is_blank)
+        ++blank_frames_;
+
+    if (!blank_state_known_ || is_blank != frame_is_blank_)
+    {
+        if (is_blank)
+        {
+            LOG(WARNING) << "Captured frame is entirely black (screen type:" << lastScreenType()
+                         << "screen rect:" << screen_rect_ << ")";
+        }
+        else
+        {
+            LOG(INFO) << "Captured frame has visible content (screen type:" << lastScreenType()
+                      << "screen rect:" << screen_rect_ << ")";
+        }
+
+        frame_is_blank_ = is_blank;
+        blank_state_known_ = true;
     }
 
     *error = Error::SUCCEEDED;
@@ -291,6 +374,10 @@ void ScreenCapturerGdi::reset()
     // Release GDI resources otherwise SetThreadDesktop will fail.
     desktop_dc_.close();
     memory_dc_.reset();
+
+    // A reset means the capture is about to come from somewhere else (a desktop switch), so the
+    // blank state is reported again for the new source instead of being carried over.
+    blank_state_known_ = false;
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -313,10 +400,16 @@ bool ScreenCapturerGdi::prepareCaptureResources()
     {
         DCHECK(!memory_dc_);
 
+        LOG(INFO) << "Creating GDI capture resources (desktop rect:" << desktop_rect << ")";
+
         if (dwm_enable_composition_func_ && dwm_is_composition_enabled_func_)
         {
             BOOL enabled;
             HRESULT hr = dwm_is_composition_enabled_func_(&enabled);
+
+            LOG(INFO) << "DWM composition enabled:" << (SUCCEEDED(hr) ? (enabled ? "yes" : "no")
+                                                                      : "unknown");
+
             if (SUCCEEDED(hr) && enabled)
             {
                 // Vote to disable Aero composited desktop effects while capturing.
@@ -343,6 +436,39 @@ bool ScreenCapturerGdi::prepareCaptureResources()
     }
 
     return true;
+}
+
+//--------------------------------------------------------------------------------------------------
+void ScreenCapturerGdi::reportCaptureDiagnostics()
+{
+    static const std::chrono::seconds kReportInterval(30);
+
+    const std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+    if (last_diagnostics_report_ == std::chrono::steady_clock::time_point())
+    {
+        last_diagnostics_report_ = now;
+        return;
+    }
+
+    if (now - last_diagnostics_report_ < kReportInterval)
+        return;
+
+    // Everything is per interval, not cumulative: what matters is whether the loop is still
+    // producing frames right now, and what those frames look like.
+    LOG(INFO) << "Capture diagnostics (30s). Frames:" << captured_frames_
+              << "blank:" << blank_frames_
+              << "unchanged:" << unchanged_frames_
+              << "bitblt failures:" << bitblt_failures_
+              << "screen rect failures:" << screen_rect_failures_
+              << "screen type:" << lastScreenType();
+
+    captured_frames_ = 0;
+    blank_frames_ = 0;
+    unchanged_frames_ = 0;
+    bitblt_failures_ = 0;
+    screen_rect_failures_ = 0;
+    last_diagnostics_report_ = now;
 }
 
 } // namespace base

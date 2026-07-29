@@ -235,8 +235,21 @@ void ScreenCapturerWin::switchToInputDesktop()
     reset();
 
     // If setThreadDesktop() fails, the thread is still assigned a desktop.
-    // So we can continue capture screen bits, just from the wrong desktop.
-    desktop_.setThreadDesktop(std::move(input_desktop));
+    // So we can continue capture screen bits, just from the wrong desktop. That is indistinguishable
+    // from a working capture in the log - it just returns the wrong (or blank) pixels - so report
+    // both the outcome and the desktop the thread actually ended up on.
+    if (!desktop_.setThreadDesktop(std::move(input_desktop)))
+    {
+        LOG(ERROR) << "Failed to switch the capture thread to desktop" << new_name
+                   << "- capture continues from the previous desktop";
+    }
+    else
+    {
+        wchar_t effective_name[128] = { 0 };
+        desktop_.assignedDesktop().name(effective_name, sizeof(effective_name));
+
+        LOG(INFO) << "Capture thread switched to desktop" << effective_name;
+    }
 
     emit sig_desktopChanged();
     checkScreenType(new_name);

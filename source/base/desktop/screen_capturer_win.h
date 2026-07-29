@@ -36,6 +36,9 @@ public:
 
     void switchToInputDesktop() final;
 
+protected:
+    ScreenType lastScreenType() const { return last_screen_type_; }
+
 private:
     void checkScreenType(const wchar_t* desktop_name);
 

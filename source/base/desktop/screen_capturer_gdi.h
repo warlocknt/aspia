@@ -22,6 +22,8 @@
 #include "base/desktop/screen_capturer_win.h"
 #include "base/win/scoped_hdc.h"
 
+#include <chrono>
+
 namespace base {
 
 class Differ;
@@ -50,6 +52,7 @@ protected:
 
 private:
     bool prepareCaptureResources();
+    void reportCaptureDiagnostics();
 
     typedef HRESULT(STDAPICALLTYPE* DwmEnableCompositionFunc) (UINT uCompositionAction);
     typedef HRESULT(STDAPICALLTYPE* DwmIsCompositionEnabledFunc) (BOOL* pfEnabled);
@@ -79,6 +82,19 @@ private:
     // GetCursorInfo fails persistently on the secure desktop; captureCursor runs per frame, so
     // only the start of a failure streak and the recovery are logged.
     bool cursor_info_failure_reported_ = false;
+
+    // Lock-screen diagnostics. After locking a Windows 7 host the picture goes black while the
+    // capture loop keeps reporting success, so nothing shows up in the log - a black screen and a
+    // static one are both "no error, no update". These record what the capture actually produced:
+    // the blank state is reported on every change, the rest as a periodic summary.
+    bool frame_is_blank_ = false;
+    bool blank_state_known_ = false;
+    int captured_frames_ = 0;
+    int blank_frames_ = 0;
+    int unchanged_frames_ = 0;
+    int bitblt_failures_ = 0;
+    int screen_rect_failures_ = 0;
+    std::chrono::steady_clock::time_point last_diagnostics_report_;
 
     Q_DISABLE_COPY(ScreenCapturerGdi)
 };
