@@ -49,10 +49,17 @@ const char kClipboardHtmlExtension[] = "clipboard_html";
 // bytes. Adaptive - already-compressed content (PNG) is sent uncompressed regardless.
 const char kClipboardZstdExtension[] = "clipboard_zstd";
 
+// Copying files through the clipboard. When a peer copies files, only the listing is sent (see
+// proto ClipboardFileList); the content is fetched lazily on paste over a separate file-transfer
+// session. Negotiated like the other clipboard extensions so an old peer, which cannot fetch the
+// content, is simply never offered a file listing.
+const char kClipboardFilesExtension[] = "clipboard_files";
+
 #if defined(Q_OS_WINDOWS)
 const char kSupportedExtensionsForManage[] =
     "select_screen;preferred_size;power_control;remote_update;system_info;video_recording;"
-    "task_manager;video_pause;audio_pause;screen_type;clipboard_image;clipboard_html;clipboard_zstd";
+    "task_manager;video_pause;audio_pause;screen_type;clipboard_image;clipboard_html;clipboard_zstd;"
+    "clipboard_files";
 
 const char kSupportedExtensionsForView[] =
     "select_screen;preferred_size;system_info;video_recording;video_pause;audio_pause;screen_type";

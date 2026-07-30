@@ -164,6 +164,31 @@ message ClipboardEvent
     bool compressed = 4;
 }
 
+// Announces that the peer copied files to its clipboard. Only the listing crosses here - names,
+// sizes and the source root - never the bytes. The receiver puts a matching entry on its own
+// clipboard; the content is fetched lazily, on paste, over a separate file-transfer session, so a
+// copy the user never pastes costs nothing. Exchanged only between peers that negotiated the
+// clipboard_files extension.
+message ClipboardFileList
+{
+    message File
+    {
+        // Path relative to |base_path|, using '/' separators. May contain subdirectories when a
+        // folder was copied.
+        string name = 1;
+
+        bool is_dir = 2;
+        uint64 size = 3;
+        int64 modify_time = 4;
+    }
+
+    // Absolute directory on the source the names are relative to. The receiver joins it with each
+    // name to address the file over the file-transfer session that fetches the content on paste.
+    string base_path = 1;
+
+    repeated File file = 2;
+}
+
 message CursorShape
 {
     enum Flags
@@ -430,6 +455,7 @@ message HostToClient
     Extension extension            = 5;
     Capabilities capabilities      = 6;
     CursorPosition cursor_position = 7;
+    ClipboardFileList clipboard_file_list = 8;
 }
 
 message ClientToHost
@@ -442,4 +468,5 @@ message ClientToHost
     Extension extension            = 6;
     Config config                  = 7;
     AudioPacket audio_packet       = 8;
+    ClipboardFileList clipboard_file_list = 9;
 }

@@ -36,6 +36,7 @@ extern const char kScreenTypeExtension[];
 extern const char kClipboardImageExtension[];
 extern const char kClipboardHtmlExtension[];
 extern const char kClipboardZstdExtension[];
+extern const char kClipboardFilesExtension[];
 
 extern const char kSupportedExtensionsForManage[];
 extern const char kSupportedExtensionsForView[];
