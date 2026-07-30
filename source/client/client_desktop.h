@@ -120,6 +120,11 @@ signals:
     void sig_drawFrame();
     void sig_mouseCursorChanged(std::shared_ptr<base::MouseCursor> mouse_cursor);
 
+    // The user pasted files the host had copied. The window layer downloads them over a separate
+    // file-transfer session and answers with provideRenderedFileList(); the paste is blocked until
+    // it does, so it must always answer.
+    void sig_renderFileListRequired(const proto::desktop::ClipboardFileList& file_list);
+
 protected:
     // Client implementation.
     void onSessionStarted() final;
@@ -130,6 +135,11 @@ private slots:
     void onClipboardEvent(const proto::desktop::ClipboardEvent& event);
     void onClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void onRenderFileList(const proto::desktop::ClipboardFileList& file_list);
+
+public:
+    // Delivers the paths the window layer downloaded for a pending paste, releasing the clipboard
+    // thread that is blocked on it.
+    void provideRenderedFileList(const QStringList& paths);
 
 private:
     void readCapabilities(const proto::desktop::Capabilities& capabilities);

@@ -68,8 +68,13 @@ public slots:
     void onFrameChanged(const base::Size& screen_size, std::shared_ptr<base::Frame> frame);
     void onDrawFrame();
     void onMouseCursorChanged(std::shared_ptr<base::MouseCursor> mouse_cursor);
+    void onRenderFileListRequired(const proto::desktop::ClipboardFileList& file_list);
 
 signals:
+    // The local paths of the files downloaded for a pending paste; empty if it failed or was
+    // cancelled. Always emitted, since the clipboard thread is blocked until it arrives.
+    void sig_renderedFileList(const QStringList& paths);
+
     void sig_desktopConfigChanged(const proto::desktop::Config& config);
     void sig_screenSelected(const proto::desktop::Screen& screen);
     void sig_preferredSizeChanged(int width, int height);

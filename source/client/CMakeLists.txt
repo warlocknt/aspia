@@ -90,6 +90,8 @@ list(APPEND SOURCE_CLIENT_CORE_UI
     ui/update_settings_dialog.ui)
 
 list(APPEND SOURCE_CLIENT_CORE_UI_DESKTOP
+    ui/desktop/clipboard_file_downloader.cc
+    ui/desktop/clipboard_file_downloader.h
     ui/desktop/desktop_config_dialog.cc
     ui/desktop/desktop_config_dialog.h
     ui/desktop/desktop_config_dialog.ui

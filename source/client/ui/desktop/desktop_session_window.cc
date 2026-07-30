@@ -38,6 +38,7 @@
 #include "base/desktop/frame_qimage.h"
 #include "base/desktop/mouse_cursor.h"
 #include "client/client_desktop.h"
+#include "client/ui/desktop/clipboard_file_downloader.h"
 #include "client/ui/desktop/desktop_config_dialog.h"
 #include "client/ui/desktop/desktop_settings.h"
 #include "client/ui/desktop/desktop_toolbar.h"
@@ -314,6 +315,12 @@ Client* DesktopSessionWindow::createClient()
             Qt::QueuedConnection);
     connect(client, &ClientDesktop::sig_mouseCursorChanged, this, &DesktopSessionWindow::onMouseCursorChanged,
             Qt::QueuedConnection);
+    connect(client, &ClientDesktop::sig_renderFileListRequired,
+            this, &DesktopSessionWindow::onRenderFileListRequired,
+            Qt::QueuedConnection);
+
+    connect(this, &DesktopSessionWindow::sig_renderedFileList, client,
+            &ClientDesktop::provideRenderedFileList, Qt::QueuedConnection);
 
     connect(this, &DesktopSessionWindow::sig_desktopConfigChanged, client, &ClientDesktop::setDesktopConfig,
             Qt::QueuedConnection);
@@ -358,6 +365,26 @@ void DesktopSessionWindow::onShowWindow()
     activateWindow();
 
     toolbar_->enableTextChat(true);
+}
+
+//--------------------------------------------------------------------------------------------------
+void DesktopSessionWindow::onRenderFileListRequired(
+    const proto::desktop::ClipboardFileList& file_list)
+{
+    LOG(INFO) << "Downloading pasted files over a file-transfer session";
+
+    // The clipboard thread is blocked waiting for this, so every outcome must answer. The downloader
+    // guarantees exactly one sig_finished, including on failure.
+    ClipboardFileDownloader* downloader =
+        new ClipboardFileDownloader(sessionState()->config(), this, this);
+
+    connect(downloader, &ClipboardFileDownloader::sig_finished, this,
+            [this](const QStringList& paths)
+    {
+        emit sig_renderedFileList(paths);
+    });
+
+    downloader->start(file_list);
 }
 
 //--------------------------------------------------------------------------------------------------

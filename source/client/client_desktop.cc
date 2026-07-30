@@ -226,14 +226,21 @@ void ClientDesktop::readClipboardFileList(const proto::desktop::ClipboardFileLis
 //--------------------------------------------------------------------------------------------------
 void ClientDesktop::onRenderFileList(const proto::desktop::ClipboardFileList& file_list)
 {
-    // The user pasted the files the host copied. Downloading them over a dedicated file-transfer
-    // session, with a progress dialog, is the next step. For now the paste is answered with no paths
-    // so the clipboard thread is released immediately and never hangs.
-    LOG(INFO) << "Render (download) requested for" << file_list.file_size()
-              << "top-level entries; download not yet implemented";
+    // The user pasted the files the host copied. The download belongs to the window layer, which has
+    // the session configuration to open a file-transfer session with and a parent for the progress
+    // dialog. It answers through provideRenderedFileList().
+    LOG(INFO) << "Download requested for" << file_list.file_size() << "top-level entries";
+
+    emit sig_renderFileListRequired(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClientDesktop::provideRenderedFileList(const QStringList& paths)
+{
+    LOG(INFO) << "Providing" << paths.size() << "downloaded paths to the pending paste";
 
     if (clipboard_monitor_)
-        clipboard_monitor_->provideRenderedFileList(QStringList());
+        clipboard_monitor_->provideRenderedFileList(paths);
 }
 
 //--------------------------------------------------------------------------------------------------
