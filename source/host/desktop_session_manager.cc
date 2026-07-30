@@ -379,6 +379,16 @@ void DesktopSessionManager::injectClipboardEvent(const proto::desktop::Clipboard
 }
 
 //--------------------------------------------------------------------------------------------------
+void DesktopSessionManager::injectClipboardFileList(
+    const proto::desktop::ClipboardFileList& file_list)
+{
+    if (is_paused_ || !session_)
+        return;
+
+    session_->injectClipboardFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
 void DesktopSessionManager::onNewIpcConnection()
 {
     LOG(INFO) << "Session process successfully connected (sid" << session_id_ << ")";
@@ -448,6 +458,9 @@ void DesktopSessionManager::startDesktopSession()
             this, &DesktopSessionManager::sig_screenTypeChanged);
     connect(session_, &DesktopSession::sig_clipboardEvent,
             this, &DesktopSessionManager::sig_clipboardEvent);
+
+    connect(session_, &DesktopSession::sig_clipboardFileList,
+            this, &DesktopSessionManager::sig_clipboardFileList);
 
     session_->setScreenCaptureFps(qApp->property("SCREEN_CAPTURE_FPS").toInt());
     session_->start();

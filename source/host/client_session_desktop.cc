@@ -272,6 +272,17 @@ void ClientSessionDesktop::onReceived(const QByteArray& buffer)
             LOG(ERROR) << "Clipboard event for non-desktop-manage session";
         }
     }
+    else if (incoming_message_->has_clipboard_file_list())
+    {
+        if (sessionType() == proto::peer::SESSION_TYPE_DESKTOP_MANAGE)
+        {
+            emit sig_injectClipboardFileList(incoming_message_->clipboard_file_list());
+        }
+        else
+        {
+            LOG(ERROR) << "Clipboard file list for non-desktop-manage session";
+        }
+    }
     else if (incoming_message_->has_extension())
     {
         readExtension(incoming_message_->extension());
@@ -558,6 +569,27 @@ void ClientSessionDesktop::injectClipboardEvent(const proto::desktop::ClipboardE
 }
 
 //--------------------------------------------------------------------------------------------------
+void ClientSessionDesktop::injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    if (sessionType() != proto::peer::SESSION_TYPE_DESKTOP_MANAGE)
+    {
+        LOG(ERROR) << "Clipboard file list can only be handled in a desktop manage session";
+        return;
+    }
+
+    // A client that has not declared the extension cannot fetch the content, so a listing would only
+    // leave unresolvable files on its clipboard. Drop it here.
+    if (!client_supports_clipboard_files_)
+    {
+        LOG(INFO) << "Clipboard file list not sent: client does not support clipboard files";
+        return;
+    }
+
+    outgoing_message_.newMessage().mutable_clipboard_file_list()->CopyFrom(file_list);
+    sendMessage(outgoing_message_.serialize());
+}
+
+//--------------------------------------------------------------------------------------------------
 void ClientSessionDesktop::readExtension(const proto::desktop::Extension& extension)
 {
     if (extension.name() == common::kTaskManagerExtension)
@@ -600,6 +632,13 @@ void ClientSessionDesktop::readExtension(const proto::desktop::Extension& extens
         // client never sends it and always receives raw, uncompressed clipboard payloads.
         LOG(INFO) << "Client supports clipboard zstd";
         client_supports_clipboard_zstd_ = true;
+    }
+    else if (extension.name() == common::kClipboardFilesExtension)
+    {
+        // Announced only after the client has seen the extension in our capabilities, so an old
+        // client never sends it and is never forwarded a file listing.
+        LOG(INFO) << "Client supports clipboard files";
+        client_supports_clipboard_files_ = true;
     }
     else if (extension.name() == common::kPowerControlExtension)
     {

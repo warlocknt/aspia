@@ -331,6 +331,14 @@ void DesktopSessionAgent::onIpcMessageReceived(const QByteArray& buffer)
             LOG(ERROR) << "Clipboard monitor NOT initialized";
         }
     }
+    else if (incoming_message_->has_clipboard_file_list())
+    {
+        // The client copied files and pasted onto this host's desktop. Placing the listing on the
+        // host clipboard so it can be fetched on paste is a later step; for now the arrival is only
+        // recorded.
+        LOG(INFO) << "Received clipboard file list from client:"
+                  << incoming_message_->clipboard_file_list().file_size() << "top-level entries";
+    }
     else if (incoming_message_->has_select_source())
     {
         LOG(INFO) << "Select source received";
@@ -439,6 +447,15 @@ void DesktopSessionAgent::onClipboardEvent(const proto::desktop::ClipboardEvent&
 }
 
 //--------------------------------------------------------------------------------------------------
+void DesktopSessionAgent::onClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    LOG(INFO) << "Send clipboard file list (" << file_list.file_size() << "top-level entries)";
+
+    outgoing_message_.newMessage().mutable_clipboard_file_list()->CopyFrom(file_list);
+    ipc_channel_->send(outgoing_message_.serialize());
+}
+
+//--------------------------------------------------------------------------------------------------
 void DesktopSessionAgent::setEnabled(bool enable)
 {
     LOG(INFO) << "Enable session: " << enable;
@@ -465,6 +482,8 @@ void DesktopSessionAgent::setEnabled(bool enable)
         clipboard_monitor_ = new common::ClipboardMonitor(this);
         connect(clipboard_monitor_, &common::ClipboardMonitor::sig_clipboardEvent,
                 this, &DesktopSessionAgent::onClipboardEvent);
+        connect(clipboard_monitor_, &common::ClipboardMonitor::sig_clipboardFileList,
+                this, &DesktopSessionAgent::onClipboardFileList);
         clipboard_monitor_->start();
 
         // Create a shared memory factory.

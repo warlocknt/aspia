@@ -168,6 +168,13 @@ void DesktopSessionIpc::injectClipboardEvent(const proto::desktop::ClipboardEven
 }
 
 //--------------------------------------------------------------------------------------------------
+void DesktopSessionIpc::injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    outgoing_message_.newMessage().mutable_clipboard_file_list()->CopyFrom(file_list);
+    ipc_channel_->send(outgoing_message_.serialize());
+}
+
+//--------------------------------------------------------------------------------------------------
 void DesktopSessionIpc::onIpcDisconnected()
 {
     LOG(INFO) << "IPC channel disconnected (sid" << session_id_ << ")";
@@ -226,6 +233,10 @@ void DesktopSessionIpc::onIpcMessageReceived(const QByteArray& buffer)
     else if (incoming_message_->has_clipboard_event())
     {
         emit sig_clipboardEvent(incoming_message_->clipboard_event());
+    }
+    else if (incoming_message_->has_clipboard_file_list())
+    {
+        emit sig_clipboardFileList(incoming_message_->clipboard_file_list());
     }
     else
     {

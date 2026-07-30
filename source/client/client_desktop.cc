@@ -82,6 +82,8 @@ void ClientDesktop::onSessionStarted()
     clipboard_monitor_ = new common::ClipboardMonitor(this);
     connect(clipboard_monitor_, &common::ClipboardMonitor::sig_clipboardEvent,
             this, &ClientDesktop::onClipboardEvent);
+    connect(clipboard_monitor_, &common::ClipboardMonitor::sig_clipboardFileList,
+            this, &ClientDesktop::onClipboardFileList);
     clipboard_monitor_->start();
 
     audio_player_ = base::AudioPlayer::create();
@@ -120,6 +122,10 @@ void ClientDesktop::onSessionMessageReceived(const QByteArray& buffer)
     else if (incoming_message_->has_clipboard_event())
     {
         readClipboardEvent(incoming_message_->clipboard_event());
+    }
+    else if (incoming_message_->has_clipboard_file_list())
+    {
+        readClipboardFileList(incoming_message_->clipboard_file_list());
     }
     else if (incoming_message_->has_capabilities())
     {
@@ -184,6 +190,32 @@ void ClientDesktop::onClipboardEvent(const proto::desktop::ClipboardEvent& event
     if (host_supports_clipboard_zstd_)
         common::compressClipboardEvent(outgoing);
     sendMessage(outgoing_message_.serialize());
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClientDesktop::onClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    // A host that has not declared the extension cannot fetch the content, so offering it a listing
+    // would only put files on its clipboard that resolve to nothing on paste. Drop it here instead.
+    if (!host_supports_clipboard_files_)
+    {
+        LOG(INFO) << "Clipboard file list not sent: host does not support clipboard files";
+        return;
+    }
+
+    proto::desktop::ClipboardFileList* outgoing =
+        outgoing_message_.newMessage().mutable_clipboard_file_list();
+    outgoing->CopyFrom(file_list);
+    sendMessage(outgoing_message_.serialize());
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClientDesktop::readClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    // The host copied files. Later steps put a matching entry on this machine's clipboard and fetch
+    // the content over a file-transfer session on paste; for now the arrival is only recorded.
+    LOG(INFO) << "Received clipboard file list from host:" << file_list.file_size()
+              << "top-level entries, base:" << file_list.base_path().c_str();
 }
 
 //--------------------------------------------------------------------------------------------------
@@ -546,6 +578,20 @@ void ClientDesktop::readCapabilities(const proto::desktop::Capabilities& capabil
         // what it sends us. As above, only once the host has declared it, so an old host never sees it.
         proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
         extension->set_name(common::kClipboardZstdExtension);
+
+        sendMessage(outgoing_message_.serialize());
+    }
+
+    host_supports_clipboard_files_ = extensions.contains(common::kClipboardFilesExtension);
+    LOG(INFO) << "Host supports clipboard files:" << host_supports_clipboard_files_;
+
+    if (host_supports_clipboard_files_)
+    {
+        // Announce that this client also copies files through the clipboard, so the host forwards a
+        // file listing when files are copied on its side. As above, only once the host has declared
+        // it, so an old host never sees it.
+        proto::desktop::Extension* extension = outgoing_message_.newMessage().mutable_extension();
+        extension->set_name(common::kClipboardFilesExtension);
 
         sendMessage(outgoing_message_.serialize());
     }

@@ -50,6 +50,7 @@ public:
     void injectMouseEvent(const proto::desktop::MouseEvent& event) final;
     void injectTouchEvent(const proto::desktop::TouchEvent& event) final;
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event) final;
+    void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list) final;
 
 private slots:
     void onIpcDisconnected();

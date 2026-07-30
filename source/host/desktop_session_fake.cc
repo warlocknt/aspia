@@ -111,4 +111,11 @@ void DesktopSessionFake::injectClipboardEvent(const proto::desktop::ClipboardEve
     // Nothing
 }
 
+//--------------------------------------------------------------------------------------------------
+void DesktopSessionFake::injectClipboardFileList(
+    const proto::desktop::ClipboardFileList& /* file_list */)
+{
+    // Nothing
+}
+
 } // namespace host

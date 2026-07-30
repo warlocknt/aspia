@@ -71,6 +71,7 @@ public:
     virtual void injectMouseEvent(const proto::desktop::MouseEvent& event) = 0;
     virtual void injectTouchEvent(const proto::desktop::TouchEvent& event) = 0;
     virtual void injectClipboardEvent(const proto::desktop::ClipboardEvent& event) = 0;
+    virtual void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list) = 0;
 
 signals:
     void sig_desktopSessionStarted();
@@ -82,6 +83,7 @@ signals:
     void sig_screenListChanged(const proto::desktop::ScreenList& list);
     void sig_screenTypeChanged(const proto::desktop::ScreenType& type);
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 };
 
 } // namespace host

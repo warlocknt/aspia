@@ -65,6 +65,7 @@ private slots:
     void onIpcDisconnected();
     void onIpcMessageReceived(const QByteArray& buffer);
     void onClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void onClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
 private:
     void setEnabled(bool enable);

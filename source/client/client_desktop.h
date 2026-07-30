@@ -128,6 +128,7 @@ protected:
 
 private slots:
     void onClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void onClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
 private:
     void readCapabilities(const proto::desktop::Capabilities& capabilities);
@@ -136,6 +137,7 @@ private:
     void readCursorShape(const proto::desktop::CursorShape& cursor_shape);
     void readCursorPosition(const proto::desktop::CursorPosition& cursor_position);
     void readClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void readClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void readExtension(const proto::desktop::Extension& extension);
 
     bool started_ = false;
@@ -152,6 +154,10 @@ private:
     // Whether the host declared the clipboard_zstd extension. Only then are outgoing clipboard
     // payloads zstd-compressed toward it.
     bool host_supports_clipboard_zstd_ = false;
+
+    // Whether the host declared the clipboard_files extension. Only then is a file listing sent when
+    // files are copied on this machine; a host without it could not fetch the content anyway.
+    bool host_supports_clipboard_files_ = false;
 
     std::shared_ptr<base::Frame> desktop_frame_;
     proto::desktop::Config desktop_config_;

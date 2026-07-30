@@ -112,6 +112,7 @@ message ServiceToDesktop
     desktop.MouseEvent mouse_event         = 7;
     desktop.TouchEvent touch_event         = 8;
     desktop.ClipboardEvent clipboard_event = 9;
+    desktop.ClipboardFileList clipboard_file_list = 10;
 }
 
 message DesktopToService
@@ -123,4 +124,5 @@ message DesktopToService
     desktop.ClipboardEvent clipboard_event = 5;
     desktop.CursorPosition cursor_position = 6;
     desktop.ScreenType screen_type         = 7;
+    desktop.ClipboardFileList clipboard_file_list = 8;
 }

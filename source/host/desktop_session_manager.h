@@ -79,6 +79,7 @@ public slots:
     void injectMouseEvent(const proto::desktop::MouseEvent& event);
     void injectTouchEvent(const proto::desktop::TouchEvent& event);
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
     void onNewIpcConnection();
     void onErrorOccurred();
@@ -93,6 +94,7 @@ signals:
     void sig_screenListChanged(const proto::desktop::ScreenList& list);
     void sig_screenTypeChanged(const proto::desktop::ScreenType& type);
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
 private:
     void setState(const base::Location& location, State state);

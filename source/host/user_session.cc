@@ -921,6 +921,8 @@ void UserSession::addNewClientSession(ClientSession* client_session)
                     desktop_session_, &DesktopSessionManager::injectTouchEvent);
             connect(desktop_client, &ClientSessionDesktop::sig_injectClipboardEvent,
                     desktop_session_, &DesktopSessionManager::injectClipboardEvent);
+            connect(desktop_client, &ClientSessionDesktop::sig_injectClipboardFileList,
+                    desktop_session_, &DesktopSessionManager::injectClipboardFileList);
 
             connect(desktop_session_, &DesktopSessionManager::sig_screenCaptured,
                     desktop_client, &ClientSessionDesktop::encodeScreen);
@@ -936,6 +938,8 @@ void UserSession::addNewClientSession(ClientSession* client_session)
                     desktop_client, &ClientSessionDesktop::setScreenType);
             connect(desktop_session_, &DesktopSessionManager::sig_clipboardEvent,
                     desktop_client, &ClientSessionDesktop::injectClipboardEvent);
+            connect(desktop_session_, &DesktopSessionManager::sig_clipboardFileList,
+                    desktop_client, &ClientSessionDesktop::injectClipboardFileList);
 
             if (enable_required)
             {

@@ -61,6 +61,7 @@ public:
     void setScreenList(const proto::desktop::ScreenList& list);
     void setScreenType(const proto::desktop::ScreenType& type);
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
     const DesktopSession::Config& desktopSessionConfig() const { return desktop_session_config_; }
 
@@ -74,6 +75,7 @@ signals:
     void sig_injectMouseEvent(const proto::desktop::MouseEvent& event);
     void sig_injectTouchEvent(const proto::desktop::TouchEvent& event);
     void sig_injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void sig_injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
 
 protected:
     // ClientSession implementation.
@@ -146,6 +148,11 @@ private:
     // Set when the client announces the clipboard_zstd extension. Only then are outgoing clipboard
     // payloads zstd-compressed toward it.
     bool client_supports_clipboard_zstd_ = false;
+
+    // Set when the client announces the clipboard_files extension. Only then is a file listing
+    // forwarded to it when files are copied on the host; a client without it could not fetch the
+    // content anyway.
+    bool client_supports_clipboard_files_ = false;
 
     QPointer<QTimer> overflow_detection_timer_;
     size_t write_overflow_count_ = 0;
