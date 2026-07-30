@@ -65,6 +65,10 @@ private:
     bool onClipboardHtml();
     void onClipboardImage();
 
+    // Reads the CF_HDROP file list, turns it into a ClipboardFileList (top-level entries only; the
+    // download expands directories later) and hands it up through onFileList().
+    void onClipboardFiles();
+
     // Records, by format name, what turned up on the clipboard but could not be carried, so the
     // end-of-session summary can report it. Counts only, never content.
     void recordUnsupported();

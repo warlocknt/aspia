@@ -143,6 +143,12 @@ void Clipboard::logSessionSummary()
 }
 
 //--------------------------------------------------------------------------------------------------
+void Clipboard::onFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    emit sig_clipboardFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
 void Clipboard::countUnsupportedOut()
 {
     if (stats_)

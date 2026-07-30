@@ -27,9 +27,13 @@
 
 #include <QBuffer>
 #include <QDataStream>
+#include <QDateTime>
+#include <QFileInfo>
 #include <QImage>
 #include <QRegularExpression>
 #include <QStringList>
+
+#include <shellapi.h>
 
 namespace common {
 
@@ -592,6 +596,15 @@ void ClipboardWin::onClipboardUpdate()
         return;
     }
 
+    // Files come last: an Explorer file copy is a clean CF_HDROP with no text or image alongside, so
+    // reaching here means nothing higher matched. Kept lowest so a rich copy that also carries a file
+    // reference is still handled as its text/image, unchanged from before.
+    if (IsClipboardFormatAvailable(CF_HDROP))
+    {
+        onClipboardFiles();
+        return;
+    }
+
     recordUnsupported();
 }
 
@@ -863,6 +876,108 @@ void ClipboardWin::onClipboardImage()
     buffer.close();
 
     onData(Clipboard::kMimeTypeImagePng, png);
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::onClipboardFiles()
+{
+    QStringList paths;
+
+    // Add a scope, so that we keep the clipboard open for as short a time as possible.
+    {
+        base::ScopedClipboard clipboard;
+
+        if (!clipboard.init(window_->hwnd()))
+        {
+            PLOG(ERROR) << "Couldn't open the clipboard";
+            return;
+        }
+
+        HGLOBAL files_global = clipboard.data(CF_HDROP);
+        if (!files_global)
+        {
+            PLOG(ERROR) << "Couldn't get files from the clipboard";
+            return;
+        }
+
+        base::ScopedHGLOBAL<char> files_lock(files_global);
+        if (!files_lock.get())
+        {
+            PLOG(ERROR) << "Couldn't lock clipboard files";
+            return;
+        }
+
+        HDROP drop = reinterpret_cast<HDROP>(files_lock.get());
+
+        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+        for (UINT i = 0; i < count; ++i)
+        {
+            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+            if (!length)
+                continue;
+
+            std::wstring path(length, L'\0');
+
+            // DragQueryFile writes |length| chars plus the terminator, so the buffer must have room
+            // for both; it does not count the terminator in the value it returned.
+            if (DragQueryFileW(drop, i, path.data(), length + 1) == 0)
+            {
+                PLOG(ERROR) << "DragQueryFileW failed";
+                continue;
+            }
+
+            paths.append(QString::fromWCharArray(path.c_str(), static_cast<int>(length)));
+        }
+    }
+
+    if (paths.isEmpty())
+    {
+        LOG(WARNING) << "Empty file list on the clipboard";
+        return;
+    }
+
+    // Explorer copies come from one directory, so its path is the root the names are relative to.
+    // Only the top level is listed here; directories are walked later, during the actual download.
+    const QString base_path = QFileInfo(paths.front()).absolutePath();
+
+    proto::desktop::ClipboardFileList file_list;
+    file_list.set_base_path(base_path.toStdString());
+
+    qint64 total_bytes = 0;
+    int dir_count = 0;
+
+    for (const QString& path : paths)
+    {
+        const QFileInfo info(path);
+
+        proto::desktop::ClipboardFileList::File* file = file_list.add_file();
+
+        // Name relative to base_path when the entry sits directly under it (the common case), the
+        // full path otherwise, so a stray multi-directory selection is still addressable.
+        if (info.absolutePath() == base_path)
+            file->set_name(info.fileName().toStdString());
+        else
+            file->set_name(info.absoluteFilePath().toStdString());
+
+        file->set_is_dir(info.isDir());
+        file->set_modify_time(info.lastModified().toSecsSinceEpoch());
+
+        if (info.isDir())
+        {
+            ++dir_count;
+        }
+        else
+        {
+            file->set_size(static_cast<quint64>(info.size()));
+            total_bytes += info.size();
+        }
+    }
+
+    // Sizes and counts only, never names - the same rule the rest of the clipboard logging follows.
+    LOG(INFO) << "Clipboard holds" << file_list.file_size() << "top-level entries ("
+              << dir_count << "folders," << total_bytes << "bytes of files)";
+
+    onFileList(file_list);
 }
 
 } // namespace common

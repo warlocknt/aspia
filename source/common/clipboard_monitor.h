@@ -43,6 +43,7 @@ public:
 
 signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void sig_injectClipboardEventPrivate(const proto::desktop::ClipboardEvent& event);
     void sig_clearClipboardPrivate();
 

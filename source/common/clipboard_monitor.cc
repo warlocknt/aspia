@@ -102,6 +102,10 @@ void ClipboardMonitor::onBeforeThreadRunning()
             this, &ClipboardMonitor::sig_clipboardEvent,
             Qt::QueuedConnection);
 
+    connect(clipboard_.get(), &Clipboard::sig_clipboardFileList,
+            this, &ClipboardMonitor::sig_clipboardFileList,
+            Qt::QueuedConnection);
+
     connect(this, &ClipboardMonitor::sig_injectClipboardEventPrivate,
             clipboard_.get(), &Clipboard::injectClipboardEvent,
             Qt::QueuedConnection);

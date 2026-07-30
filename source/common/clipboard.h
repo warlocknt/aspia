@@ -115,6 +115,10 @@ public slots:
 signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
 
+    // The local clipboard now holds a file listing (the user copied files). Only the listing, never
+    // the bytes: the content is fetched on paste, on the far side, over a file-transfer session.
+    void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
+
 protected:
     virtual void init() = 0;
 
@@ -131,6 +135,10 @@ protected:
     // A one-line, content-free description of the formats that turned up but could not be carried,
     // for the end-of-session summary. Empty unless a platform records them.
     virtual QString unsupportedFormatsSummary() const { return QString(); }
+
+    // Emits sig_clipboardFileList. Called by the platform implementation when the local clipboard
+    // turns out to hold files rather than text or an image.
+    void onFileList(const proto::desktop::ClipboardFileList& file_list);
 
     // Increment a tally if one is attached. Called by the platform implementation as content moves.
     void countUnsupportedOut();
