@@ -35,6 +35,7 @@ public:
     void start();
 
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void clearClipboard();
 
     // A tear-free copy of the per-type tallies for the statistics view. Safe to call from another
@@ -45,6 +46,7 @@ signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
     void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void sig_injectClipboardEventPrivate(const proto::desktop::ClipboardEvent& event);
+    void sig_injectClipboardFileListPrivate(const proto::desktop::ClipboardFileList& file_list);
     void sig_clearClipboardPrivate();
 
 private slots:

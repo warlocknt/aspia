@@ -263,6 +263,15 @@ void Clipboard::injectClipboardEvent(const proto::desktop::ClipboardEvent& event
 }
 
 //--------------------------------------------------------------------------------------------------
+void Clipboard::injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    LOG(INFO) << "Applying received clipboard file list:" << file_list.file_size()
+              << "top-level entries";
+
+    setFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
 void Clipboard::clearClipboard()
 {
     setData(kMimeTypeTextUtf8, QByteArray());

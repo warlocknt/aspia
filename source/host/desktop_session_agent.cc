@@ -333,11 +333,20 @@ void DesktopSessionAgent::onIpcMessageReceived(const QByteArray& buffer)
     }
     else if (incoming_message_->has_clipboard_file_list())
     {
-        // The client copied files and pasted onto this host's desktop. Placing the listing on the
-        // host clipboard so it can be fetched on paste is a later step; for now the arrival is only
-        // recorded.
-        LOG(INFO) << "Received clipboard file list from client:"
-                  << incoming_message_->clipboard_file_list().file_size() << "top-level entries";
+        if (clipboard_monitor_)
+        {
+            LOG(INFO) << "Received clipboard file list from client:"
+                      << incoming_message_->clipboard_file_list().file_size() << "top-level entries";
+
+            // Advertise the client's files on the host clipboard (delayed render); the content is
+            // fetched when someone pastes on the host.
+            clipboard_monitor_->injectClipboardFileList(
+                incoming_message_->clipboard_file_list());
+        }
+        else
+        {
+            LOG(ERROR) << "Clipboard monitor NOT initialized";
+        }
     }
     else if (incoming_message_->has_select_source())
     {

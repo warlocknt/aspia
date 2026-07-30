@@ -110,6 +110,7 @@ public:
 public slots:
     void start();
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
+    void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void clearClipboard();
 
 signals:
@@ -125,6 +126,10 @@ protected:
     // Content is carried as a mime type and raw bytes rather than as text: an image is not a
     // string, and neither is a file list. For text the bytes are UTF-8; for HTML, a UTF-8 fragment.
     virtual void setData(const QString& mime_type, const QByteArray& data) = 0;
+
+    // Puts a file listing on the local clipboard. Only Windows (delayed-render CF_HDROP) implements
+    // it; elsewhere copying files through the clipboard is not offered, so the default does nothing.
+    virtual void setFileList(const proto::desktop::ClipboardFileList& /* file_list */) {}
 
     // |text_fallback| is a plain-text rendering carried alongside formatted (HTML) content, so a
     // peer that cannot take HTML can be downgraded to text at the network boundary. Empty for text

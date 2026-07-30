@@ -34,6 +34,7 @@
 #include <QStringList>
 
 #include <shellapi.h>
+#include <shlobj.h>
 
 namespace common {
 
@@ -544,6 +545,25 @@ bool ClipboardWin::onMessage(UINT message, WPARAM /* wParam */, LPARAM /* lParam
             onClipboardUpdate();
             break;
 
+        // Sent when an application pastes the files we advertised (WM_RENDERFORMAT), or takes the
+        // promise over as we lose ownership (WM_RENDERALLFORMATS). Either way we owe it the CF_HDROP
+        // now. The clipboard is already open by the OS during these, so we must not open it.
+        case WM_RENDERFORMAT:
+        case WM_RENDERALLFORMATS:
+            onRenderFileList();
+            break;
+
+        // Another application took the clipboard, so the listing we were holding is no longer what
+        // the user would paste. Drop it.
+        case WM_DESTROYCLIPBOARD:
+            if (have_pending_file_list_)
+            {
+                LOG(INFO) << "Clipboard taken over; dropping the held file list";
+                pending_file_list_.Clear();
+                have_pending_file_list_ = false;
+            }
+            break;
+
         default:
             return false;
     }
@@ -601,6 +621,15 @@ void ClipboardWin::onClipboardUpdate()
     // reference is still handled as its text/image, unchanged from before.
     if (IsClipboardFormatAvailable(CF_HDROP))
     {
+        // Our own delayed-render promise, placed when a listing arrived from the peer, shows up here
+        // as a clipboard change. Reading it would ask us to render it (re-entrant) and send the
+        // peer's own files back to it. Swallow that one update.
+        if (own_file_list_pending_)
+        {
+            own_file_list_pending_ = false;
+            return;
+        }
+
         onClipboardFiles();
         return;
     }
@@ -978,6 +1007,87 @@ void ClipboardWin::onClipboardFiles()
               << dir_count << "folders," << total_bytes << "bytes of files)";
 
     onFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::setFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    if (!window_)
+    {
+        LOG(ERROR) << "Window not created";
+        return;
+    }
+
+    // Held so the files can be produced when the user pastes. Nothing is fetched now: the content is
+    // downloaded on paste, in onRenderFileList (later step), so a listing the user never pastes costs
+    // nothing.
+    pending_file_list_ = file_list;
+    have_pending_file_list_ = true;
+
+    // Advertise CF_HDROP with delayed rendering: an empty handle registers the promise, and Windows
+    // asks for the real data (WM_RENDERFORMAT) only when something pastes. |window_| becomes the
+    // clipboard owner and receives that message.
+    base::ScopedClipboard clipboard;
+    if (!clipboard.init(window_->hwnd()))
+    {
+        PLOG(ERROR) << "Couldn't open the clipboard";
+        have_pending_file_list_ = false;
+        return;
+    }
+
+    clipboard.empty();
+
+    // The change this raises is our own promise, not a user copy - do not read it back to the peer.
+    own_file_list_pending_ = true;
+    clipboard.setData(CF_HDROP, nullptr);
+
+    LOG(INFO) << "Advertised" << file_list.file_size() << "top-level entries on the clipboard "
+                 "(delayed render)";
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::onRenderFileList()
+{
+    if (!have_pending_file_list_)
+    {
+        LOG(WARNING) << "Render requested with no file list held";
+        return;
+    }
+
+    // Downloading the content over a file-transfer session and returning the temporary paths is the
+    // next step. For now the paste is acknowledged with an empty, well-formed CF_HDROP so the pasting
+    // application gets a clean "nothing" instead of a hang, and the path is proven end to end.
+    LOG(INFO) << "Paste requested for" << pending_file_list_.file_size()
+              << "top-level entries (download not yet implemented)";
+
+    const size_t bytes = sizeof(DROPFILES) + sizeof(wchar_t); // Header + the final terminator.
+
+    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
+    if (!global)
+    {
+        PLOG(ERROR) << "GlobalAlloc failed";
+        return;
+    }
+
+    DROPFILES* drop_files = reinterpret_cast<DROPFILES*>(GlobalLock(global));
+    if (!drop_files)
+    {
+        PLOG(ERROR) << "GlobalLock failed";
+        GlobalFree(global);
+        return;
+    }
+
+    drop_files->pFiles = sizeof(DROPFILES);
+    drop_files->fWide = TRUE;
+    GlobalUnlock(global);
+
+    // During WM_RENDERFORMAT the OS holds the clipboard open, so SetClipboardData is called directly,
+    // without opening it here.
+    if (!SetClipboardData(CF_HDROP, global))
+    {
+        PLOG(ERROR) << "SetClipboardData failed";
+        GlobalFree(global);
+    }
 }
 
 } // namespace common

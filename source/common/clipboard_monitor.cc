@@ -76,6 +76,12 @@ void ClipboardMonitor::injectClipboardEvent(const proto::desktop::ClipboardEvent
 }
 
 //--------------------------------------------------------------------------------------------------
+void ClipboardMonitor::injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    emit sig_injectClipboardFileListPrivate(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
 void ClipboardMonitor::clearClipboard()
 {
     emit sig_clearClipboardPrivate();
@@ -108,6 +114,10 @@ void ClipboardMonitor::onBeforeThreadRunning()
 
     connect(this, &ClipboardMonitor::sig_injectClipboardEventPrivate,
             clipboard_.get(), &Clipboard::injectClipboardEvent,
+            Qt::QueuedConnection);
+
+    connect(this, &ClipboardMonitor::sig_injectClipboardFileListPrivate,
+            clipboard_.get(), &Clipboard::injectClipboardFileList,
             Qt::QueuedConnection);
 
     connect(this, &ClipboardMonitor::sig_clearClipboardPrivate,

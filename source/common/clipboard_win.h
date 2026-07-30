@@ -43,6 +43,7 @@ protected:
     // Clipboard implementation.
     void init() final;
     void setData(const QString& mime_type, const QByteArray& data) final;
+    void setFileList(const proto::desktop::ClipboardFileList& file_list) final;
     QString unsupportedFormatsSummary() const final;
 
 private:
@@ -69,6 +70,11 @@ private:
     // download expands directories later) and hands it up through onFileList().
     void onClipboardFiles();
 
+    // Renders CF_HDROP on demand: Windows sends WM_RENDERFORMAT the moment another application
+    // pastes the files we advertised, and WM_RENDERALLFORMATS when it takes the promise over as this
+    // owner goes away. The paths pasted come from |pending_file_list_|.
+    void onRenderFileList();
+
     // Records, by format name, what turned up on the clipboard but could not be carried, so the
     // end-of-session summary can report it. Counts only, never content.
     void recordUnsupported();
@@ -85,6 +91,16 @@ private:
 
     // How often each unsupported format name was seen this session, for the teardown summary.
     QHash<QString, int> unsupported_seen_;
+
+    // The listing a peer copied, held so its files can be produced when the user pastes here. Empty
+    // when nothing has been received or the local clipboard has since been taken over by another
+    // application (WM_DESTROYCLIPBOARD).
+    proto::desktop::ClipboardFileList pending_file_list_;
+    bool have_pending_file_list_ = false;
+
+    // Set while our own delayed-render CF_HDROP is being placed, so the WM_CLIPBOARDUPDATE it raises
+    // is not read back and sent to the peer as if the user had copied files locally.
+    bool own_file_list_pending_ = false;
 
     Q_DISABLE_COPY(ClipboardWin)
 };

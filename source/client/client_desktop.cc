@@ -212,10 +212,13 @@ void ClientDesktop::onClipboardFileList(const proto::desktop::ClipboardFileList&
 //--------------------------------------------------------------------------------------------------
 void ClientDesktop::readClipboardFileList(const proto::desktop::ClipboardFileList& file_list)
 {
-    // The host copied files. Later steps put a matching entry on this machine's clipboard and fetch
-    // the content over a file-transfer session on paste; for now the arrival is only recorded.
     LOG(INFO) << "Received clipboard file list from host:" << file_list.file_size()
-              << "top-level entries, base:" << file_list.base_path().c_str();
+              << "top-level entries";
+
+    // Advertise the files on this machine's clipboard (delayed render). The content is fetched over
+    // a file-transfer session when the user pastes; see onRenderFileList on the clipboard side.
+    if (clipboard_monitor_)
+        clipboard_monitor_->injectClipboardFileList(file_list);
 }
 
 //--------------------------------------------------------------------------------------------------
