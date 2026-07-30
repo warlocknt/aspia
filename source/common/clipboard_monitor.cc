@@ -82,6 +82,12 @@ void ClipboardMonitor::injectClipboardFileList(const proto::desktop::ClipboardFi
 }
 
 //--------------------------------------------------------------------------------------------------
+void ClipboardMonitor::provideRenderedFileList(const QStringList& paths)
+{
+    emit sig_renderedFileListPrivate(paths);
+}
+
+//--------------------------------------------------------------------------------------------------
 void ClipboardMonitor::clearClipboard()
 {
     emit sig_clearClipboardPrivate();
@@ -110,6 +116,14 @@ void ClipboardMonitor::onBeforeThreadRunning()
 
     connect(clipboard_.get(), &Clipboard::sig_clipboardFileList,
             this, &ClipboardMonitor::sig_clipboardFileList,
+            Qt::QueuedConnection);
+
+    connect(clipboard_.get(), &Clipboard::sig_renderFileList,
+            this, &ClipboardMonitor::sig_renderFileList,
+            Qt::QueuedConnection);
+
+    connect(this, &ClipboardMonitor::sig_renderedFileListPrivate,
+            clipboard_.get(), &Clipboard::provideRenderedFileList,
             Qt::QueuedConnection);
 
     connect(this, &ClipboardMonitor::sig_injectClipboardEventPrivate,

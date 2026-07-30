@@ -28,7 +28,10 @@
 #include <QBuffer>
 #include <QDataStream>
 #include <QDateTime>
+#include <QDir>
+#include <QEventLoop>
 #include <QFileInfo>
+#include <QTimer>
 #include <QImage>
 #include <QRegularExpression>
 #include <QStringList>
@@ -292,6 +295,52 @@ QByteArray htmlFragmentToPlainText(const QByteArray& html)
     text.replace(QStringLiteral("&amp;"), QStringLiteral("&"));
 
     return text.toUtf8();
+}
+
+//--------------------------------------------------------------------------------------------------
+// Builds a CF_HDROP payload (a DROPFILES header followed by the NUL-separated wide paths, ending in
+// a double NUL) from local file paths. An empty list yields a well-formed empty drop. Ownership of
+// the returned handle passes to the clipboard via SetClipboardData; nullptr on failure.
+HGLOBAL buildHdrop(const QStringList& paths)
+{
+    size_t chars = 1; // The final, list-terminating NUL.
+    for (const QString& path : paths)
+        chars += static_cast<size_t>(path.length()) + 1;
+
+    const size_t bytes = sizeof(DROPFILES) + chars * sizeof(wchar_t);
+
+    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
+    if (!global)
+    {
+        PLOG(ERROR) << "GlobalAlloc failed";
+        return nullptr;
+    }
+
+    DROPFILES* drop_files = reinterpret_cast<DROPFILES*>(GlobalLock(global));
+    if (!drop_files)
+    {
+        PLOG(ERROR) << "GlobalLock failed";
+        GlobalFree(global);
+        return nullptr;
+    }
+
+    drop_files->pFiles = sizeof(DROPFILES);
+    drop_files->fWide = TRUE;
+
+    wchar_t* out = reinterpret_cast<wchar_t*>(reinterpret_cast<char*>(drop_files) + sizeof(DROPFILES));
+    for (const QString& path : paths)
+    {
+        // CF_HDROP paths are native, backslash-separated; a forward slash from a joined relative name
+        // would confuse the pasting shell.
+        const QString native = QDir::toNativeSeparators(path);
+        const int length = native.toWCharArray(out);
+        out += length;
+        *out++ = L'\0';
+    }
+    *out = L'\0';
+
+    GlobalUnlock(global);
+    return global;
 }
 
 } // namespace
@@ -1054,32 +1103,42 @@ void ClipboardWin::onRenderFileList()
         return;
     }
 
-    // Downloading the content over a file-transfer session and returning the temporary paths is the
-    // next step. For now the paste is acknowledged with an empty, well-formed CF_HDROP so the pasting
-    // application gets a clean "nothing" instead of a hang, and the path is proven end to end.
-    LOG(INFO) << "Paste requested for" << pending_file_list_.file_size()
-              << "top-level entries (download not yet implemented)";
+    LOG(INFO) << "Paste requested for" << pending_file_list_.file_size() << "top-level entries";
 
-    const size_t bytes = sizeof(DROPFILES) + sizeof(wchar_t); // Header + the final terminator.
+    rendered_paths_.clear();
 
-    HGLOBAL global = GlobalAlloc(GMEM_MOVEABLE | GMEM_ZEROINIT, bytes);
+    // The download runs on the GUI thread; this handler must not return until it has the paths, so it
+    // blocks in a nested loop. A hard timeout bounds that wait - a paste falls back to an empty drop
+    // rather than hanging the pasting application forever if the download never reports back.
+    static const int kRenderTimeoutMs = 10 * 60 * 1000; // 10 minutes.
+
+    QEventLoop loop;
+    render_loop_ = &loop;
+
+    QTimer timeout;
+    timeout.setSingleShot(true);
+    connect(&timeout, &QTimer::timeout, &loop, [&loop]()
+    {
+        LOG(ERROR) << "Timed out waiting for the pasted files to download";
+        loop.quit();
+    });
+    timeout.start(kRenderTimeoutMs);
+
+    // Ask the owner (on the GUI thread) to download the advertised files. It replies through
+    // provideRenderedFileList -> onRenderedFileList, which quits the loop.
+    requestRenderFileList(pending_file_list_);
+
+    loop.exec();
+    render_loop_ = nullptr;
+
+    if (rendered_paths_.isEmpty())
+        LOG(INFO) << "No paths rendered; pasting nothing";
+    else
+        LOG(INFO) << "Rendering" << rendered_paths_.size() << "downloaded paths for paste";
+
+    HGLOBAL global = buildHdrop(rendered_paths_);
     if (!global)
-    {
-        PLOG(ERROR) << "GlobalAlloc failed";
         return;
-    }
-
-    DROPFILES* drop_files = reinterpret_cast<DROPFILES*>(GlobalLock(global));
-    if (!drop_files)
-    {
-        PLOG(ERROR) << "GlobalLock failed";
-        GlobalFree(global);
-        return;
-    }
-
-    drop_files->pFiles = sizeof(DROPFILES);
-    drop_files->fWide = TRUE;
-    GlobalUnlock(global);
 
     // During WM_RENDERFORMAT the OS holds the clipboard open, so SetClipboardData is called directly,
     // without opening it here.
@@ -1088,6 +1147,19 @@ void ClipboardWin::onRenderFileList()
         PLOG(ERROR) << "SetClipboardData failed";
         GlobalFree(global);
     }
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClipboardWin::onRenderedFileList(const QStringList& paths)
+{
+    rendered_paths_ = paths;
+
+    // Wakes onRenderFileList, which is blocked waiting for exactly this. A reply arriving with no
+    // paste in flight (a late or duplicate download) is simply ignored.
+    if (render_loop_)
+        render_loop_->quit();
+    else
+        LOG(WARNING) << "Rendered file list arrived with no paste in flight";
 }
 
 } // namespace common

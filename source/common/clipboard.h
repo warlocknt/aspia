@@ -23,6 +23,7 @@
 #include <memory>
 
 #include <QObject>
+#include <QStringList>
 
 #include "proto/desktop.h"
 
@@ -113,12 +114,22 @@ public slots:
     void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
     void clearClipboard();
 
+    // The result of a download requested by sig_renderFileList: the local (temporary) paths the
+    // pasted files now live at, or empty if the download failed or was cancelled. Runs on the
+    // clipboard thread; the platform layer uses it to satisfy the pending paste.
+    void provideRenderedFileList(const QStringList& paths);
+
 signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
 
     // The local clipboard now holds a file listing (the user copied files). Only the listing, never
     // the bytes: the content is fetched on paste, on the far side, over a file-transfer session.
     void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
+
+    // The user pasted the advertised files, so their content is needed now. The owner downloads the
+    // listing over a file-transfer session and returns the local paths through
+    // provideRenderedFileList. Emitted on the clipboard thread; handled on the GUI thread.
+    void sig_renderFileList(const proto::desktop::ClipboardFileList& file_list);
 
 protected:
     virtual void init() = 0;
@@ -130,6 +141,14 @@ protected:
     // Puts a file listing on the local clipboard. Only Windows (delayed-render CF_HDROP) implements
     // it; elsewhere copying files through the clipboard is not offered, so the default does nothing.
     virtual void setFileList(const proto::desktop::ClipboardFileList& /* file_list */) {}
+
+    // Delivers the downloaded paths to the platform layer waiting on a pending paste. Windows quits
+    // the loop that WM_RENDERFORMAT is blocked on; other platforms have no pending paste.
+    virtual void onRenderedFileList(const QStringList& /* paths */) {}
+
+    // Emits sig_renderFileList. Called by the platform layer from a pending paste to ask the owner
+    // to download the advertised files.
+    void requestRenderFileList(const proto::desktop::ClipboardFileList& file_list);
 
     // |text_fallback| is a plain-text rendering carried alongside formatted (HTML) content, so a
     // peer that cannot take HTML can be downgraded to text at the network boundary. Empty for text

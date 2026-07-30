@@ -84,6 +84,8 @@ void ClientDesktop::onSessionStarted()
             this, &ClientDesktop::onClipboardEvent);
     connect(clipboard_monitor_, &common::ClipboardMonitor::sig_clipboardFileList,
             this, &ClientDesktop::onClipboardFileList);
+    connect(clipboard_monitor_, &common::ClipboardMonitor::sig_renderFileList,
+            this, &ClientDesktop::onRenderFileList);
     clipboard_monitor_->start();
 
     audio_player_ = base::AudioPlayer::create();
@@ -219,6 +221,19 @@ void ClientDesktop::readClipboardFileList(const proto::desktop::ClipboardFileLis
     // a file-transfer session when the user pastes; see onRenderFileList on the clipboard side.
     if (clipboard_monitor_)
         clipboard_monitor_->injectClipboardFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
+void ClientDesktop::onRenderFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    // The user pasted the files the host copied. Downloading them over a dedicated file-transfer
+    // session, with a progress dialog, is the next step. For now the paste is answered with no paths
+    // so the clipboard thread is released immediately and never hangs.
+    LOG(INFO) << "Render (download) requested for" << file_list.file_size()
+              << "top-level entries; download not yet implemented";
+
+    if (clipboard_monitor_)
+        clipboard_monitor_->provideRenderedFileList(QStringList());
 }
 
 //--------------------------------------------------------------------------------------------------

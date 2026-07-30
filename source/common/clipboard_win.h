@@ -22,8 +22,11 @@
 #include <qt_windows.h>
 
 #include <QHash>
+#include <QStringList>
 
 #include "common/clipboard.h"
+
+class QEventLoop;
 
 namespace base {
 class MessageWindow;
@@ -44,6 +47,7 @@ protected:
     void init() final;
     void setData(const QString& mime_type, const QByteArray& data) final;
     void setFileList(const proto::desktop::ClipboardFileList& file_list) final;
+    void onRenderedFileList(const QStringList& paths) final;
     QString unsupportedFormatsSummary() const final;
 
 private:
@@ -101,6 +105,12 @@ private:
     // Set while our own delayed-render CF_HDROP is being placed, so the WM_CLIPBOARDUPDATE it raises
     // is not read back and sent to the peer as if the user had copied files locally.
     bool own_file_list_pending_ = false;
+
+    // A paste (WM_RENDERFORMAT) must hand back the files before it returns, but the download runs on
+    // the GUI thread. onRenderFileList blocks in this nested loop until provideRenderedFileList
+    // delivers the paths (or a timeout fires, so a paste can never hang indefinitely).
+    QEventLoop* render_loop_ = nullptr;
+    QStringList rendered_paths_;
 
     Q_DISABLE_COPY(ClipboardWin)
 };

@@ -129,6 +129,7 @@ protected:
 private slots:
     void onClipboardEvent(const proto::desktop::ClipboardEvent& event);
     void onClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
+    void onRenderFileList(const proto::desktop::ClipboardFileList& file_list);
 
 private:
     void readCapabilities(const proto::desktop::Capabilities& capabilities);

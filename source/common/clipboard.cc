@@ -272,6 +272,18 @@ void Clipboard::injectClipboardFileList(const proto::desktop::ClipboardFileList&
 }
 
 //--------------------------------------------------------------------------------------------------
+void Clipboard::provideRenderedFileList(const QStringList& paths)
+{
+    onRenderedFileList(paths);
+}
+
+//--------------------------------------------------------------------------------------------------
+void Clipboard::requestRenderFileList(const proto::desktop::ClipboardFileList& file_list)
+{
+    emit sig_renderFileList(file_list);
+}
+
+//--------------------------------------------------------------------------------------------------
 void Clipboard::clearClipboard()
 {
     setData(kMimeTypeTextUtf8, QByteArray());

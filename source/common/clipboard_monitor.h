@@ -36,6 +36,9 @@ public:
 
     void injectClipboardEvent(const proto::desktop::ClipboardEvent& event);
     void injectClipboardFileList(const proto::desktop::ClipboardFileList& file_list);
+
+    // Delivers the paths downloaded for a paste back to the clipboard thread (see sig_renderFileList).
+    void provideRenderedFileList(const QStringList& paths);
     void clearClipboard();
 
     // A tear-free copy of the per-type tallies for the statistics view. Safe to call from another
@@ -45,8 +48,10 @@ public:
 signals:
     void sig_clipboardEvent(const proto::desktop::ClipboardEvent& event);
     void sig_clipboardFileList(const proto::desktop::ClipboardFileList& file_list);
+    void sig_renderFileList(const proto::desktop::ClipboardFileList& file_list);
     void sig_injectClipboardEventPrivate(const proto::desktop::ClipboardEvent& event);
     void sig_injectClipboardFileListPrivate(const proto::desktop::ClipboardFileList& file_list);
+    void sig_renderedFileListPrivate(const QStringList& paths);
     void sig_clearClipboardPrivate();
 
 private slots:
