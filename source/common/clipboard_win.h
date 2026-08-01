@@ -84,6 +84,11 @@ private:
     // produces the paths in both cases.
     bool readFileListFromDataObject(QStringList* paths);
 
+    // Asks the clipboard for CF_HDROP without going through the data object. Kept as a fallback:
+    // reading the object is a call into the process that owns the clipboard and can fail on its own,
+    // while this works whenever CF_HDROP has already been rendered onto the clipboard.
+    bool readFileListDirectly(QStringList* paths);
+
     // Renders CF_HDROP on demand: Windows sends WM_RENDERFORMAT the moment another application
     // pastes the files we advertised, and WM_RENDERALLFORMATS when it takes the promise over as this
     // owner goes away. The paths pasted come from |pending_file_list_|.

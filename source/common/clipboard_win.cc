@@ -133,6 +133,43 @@ QString availableFormats()
 }
 
 //--------------------------------------------------------------------------------------------------
+// The formats an OLE data object says it can supply, by name. This is what the clipboard's owner
+// really offers, as opposed to what has already been rendered onto the clipboard, so it separates
+// "the copy holds no files" from "the object refused to answer". Names only, never content.
+QString dataObjectFormats(IDataObject* data_object)
+{
+    IEnumFORMATETC* enumerator = nullptr;
+    HRESULT hr = data_object->EnumFormatEtc(DATADIR_GET, &enumerator);
+    if (FAILED(hr) || !enumerator)
+        return QStringLiteral("<unavailable, hr=%1>").arg(hr, 0, 16);
+
+    QStringList formats;
+
+    FORMATETC entry;
+    ULONG fetched = 0;
+
+    while (enumerator->Next(1, &entry, &fetched) == S_OK && fetched == 1)
+    {
+        wchar_t name[128] = { 0 };
+
+        if (GetClipboardFormatNameW(entry.cfFormat, name, static_cast<int>(std::size(name))) > 0)
+            formats << QStringLiteral("%1(%2)").arg(QString::fromWCharArray(name)).arg(entry.cfFormat);
+        else
+            formats << standardFormatName(entry.cfFormat);
+
+        if (entry.ptd)
+            CoTaskMemFree(entry.ptd);
+    }
+
+    enumerator->Release();
+
+    if (formats.isEmpty())
+        return QStringLiteral("<none>");
+
+    return formats.join(QStringLiteral(", "));
+}
+
+//--------------------------------------------------------------------------------------------------
 // Extracts the fragment from a Windows "HTML Format" buffer. That buffer is a short ASCII header of
 // "Key:offset" lines followed by the HTML, where the offsets are byte positions from the start.
 // The fragment is what the user actually selected, marked by StartFragment/EndFragment; the rest is
@@ -997,7 +1034,12 @@ bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
     // CF_HDROP already sitting on the clipboard, which OLE wraps in an object of its own.
     HRESULT hr = OleGetClipboard(&data_object);
     if (FAILED(hr) || !data_object)
+    {
+        // Reported, not swallowed: the object belongs to another process and, for the host agent,
+        // another account, so this is exactly where a cross-account refusal would surface.
+        LOG(ERROR) << "OleGetClipboard failed (hr=" << QString::number(hr, 16) << ")";
         return false;
+    }
 
     FORMATETC format;
     memset(&format, 0, sizeof(format));
@@ -1008,7 +1050,17 @@ bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
 
     // Asks whether the object can produce the format, which a delayed-rendering owner answers for
     // content it has not built yet. Anything that is not a file copy says no here.
-    bool has_files = (data_object->QueryGetData(&format) == S_OK);
+    hr = data_object->QueryGetData(&format);
+    bool has_files = (hr == S_OK);
+
+    if (!has_files)
+    {
+        // Only reached for content nothing else recognised, so this is rare and worth spelling out:
+        // it separates "the copy holds no files" from "the object would not talk to us". The formats
+        // it does offer are listed by name, which is the difference between those two cases.
+        LOG(INFO) << "Clipboard data object does not offer CF_HDROP (hr="
+                  << QString::number(hr, 16) << "). Offered:" << dataObjectFormats(data_object);
+    }
 
     STGMEDIUM medium;
     memset(&medium, 0, sizeof(medium));
@@ -1063,11 +1115,49 @@ bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
 }
 
 //--------------------------------------------------------------------------------------------------
+bool ClipboardWin::readFileListDirectly(QStringList* paths)
+{
+    // The pre-OLE way of asking. Kept as a fallback because the two can fail independently: reading
+    // the data object is a call into the process that owns the clipboard, while this stays inside
+    // the clipboard itself and works whenever CF_HDROP has already been rendered onto it.
+    base::ScopedClipboard clipboard;
+    if (!clipboard.init(window_->hwnd()))
+        return false;
+
+    HGLOBAL files_global = clipboard.data(CF_HDROP);
+    if (!files_global)
+        return false;
+
+    base::ScopedHGLOBAL<char> files_lock(files_global);
+    if (!files_lock.get())
+        return false;
+
+    HDROP drop = reinterpret_cast<HDROP>(files_lock.get());
+
+    const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+    for (UINT i = 0; i < count; ++i)
+    {
+        const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+        if (!length)
+            continue;
+
+        std::wstring path(length, L'\0');
+
+        if (DragQueryFileW(drop, i, path.data(), length + 1) == 0)
+            continue;
+
+        paths->append(QString::fromWCharArray(path.c_str(), static_cast<int>(length)));
+    }
+
+    return !paths->isEmpty();
+}
+
+//--------------------------------------------------------------------------------------------------
 bool ClipboardWin::onClipboardFiles()
 {
     QStringList paths;
 
-    if (!readFileListFromDataObject(&paths))
+    if (!readFileListFromDataObject(&paths) && !readFileListDirectly(&paths))
         return false;
 
     // Explorer copies come from one directory, so its path is the root the names are relative to.
