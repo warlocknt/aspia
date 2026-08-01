@@ -333,20 +333,14 @@ void DesktopSessionAgent::onIpcMessageReceived(const QByteArray& buffer)
     }
     else if (incoming_message_->has_clipboard_file_list())
     {
-        if (clipboard_monitor_)
-        {
-            LOG(INFO) << "Received clipboard file list from client:"
-                      << incoming_message_->clipboard_file_list().file_size() << "top-level entries";
-
-            // Advertise the client's files on the host clipboard (delayed render); the content is
-            // fetched when someone pastes on the host.
-            clipboard_monitor_->injectClipboardFileList(
-                incoming_message_->clipboard_file_list());
-        }
-        else
-        {
-            LOG(ERROR) << "Clipboard monitor NOT initialized";
-        }
+        // Deliberately NOT advertised on the host clipboard. Advertising promises content we cannot
+        // deliver: fetching it would mean the host pulling files from the client, and the agent has
+        // no outbound connection to it. A pasted promise would then block the pasting application
+        // until the render timeout with nothing to show for it. Until that direction has a transport
+        // of its own, the listing is dropped here, so a paste on the host simply offers no files.
+        LOG(INFO) << "Received clipboard file list from client ("
+                  << incoming_message_->clipboard_file_list().file_size()
+                  << "top-level entries), ignored: pasting client files on the host is not supported";
     }
     else if (incoming_message_->has_select_source())
     {

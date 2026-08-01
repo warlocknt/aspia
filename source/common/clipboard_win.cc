@@ -347,7 +347,8 @@ HGLOBAL buildHdrop(const QStringList& paths)
 
 //--------------------------------------------------------------------------------------------------
 ClipboardWin::ClipboardWin(QObject* parent)
-    : Clipboard(parent)
+    : Clipboard(parent),
+      alive_(std::make_shared<bool>(true))
 {
     LOG(INFO) << "Ctor";
 }
@@ -356,6 +357,14 @@ ClipboardWin::ClipboardWin(QObject* parent)
 ClipboardWin::~ClipboardWin()
 {
     LOG(INFO) << "Dtor";
+
+    // A paste may still be waiting in the nested render loop - that loop pumps messages, which is how
+    // this destructor can run at all while it waits. Tell it to stop and to keep its hands off this
+    // object once it wakes.
+    *alive_ = false;
+
+    if (render_loop_)
+        render_loop_->quit();
 
     if (!window_)
     {
@@ -1103,6 +1112,15 @@ void ClipboardWin::onRenderFileList()
         return;
     }
 
+    // A paste arriving while an earlier one is still waiting must not nest a second loop inside it:
+    // the inner one would overwrite |render_loop_|, leaving the outer frame unwakeable. The repeat
+    // pastes nothing rather than deadlocking the first.
+    if (rendering_)
+    {
+        LOG(WARNING) << "A paste is already waiting for its download; this one pastes nothing";
+        return;
+    }
+
     LOG(INFO) << "Paste requested for" << pending_file_list_.file_size() << "top-level entries";
 
     rendered_paths_.clear();
@@ -1114,6 +1132,7 @@ void ClipboardWin::onRenderFileList()
 
     QEventLoop loop;
     render_loop_ = &loop;
+    rendering_ = true;
 
     QTimer timeout;
     timeout.setSingleShot(true);
@@ -1124,12 +1143,26 @@ void ClipboardWin::onRenderFileList()
     });
     timeout.start(kRenderTimeoutMs);
 
+    // Taken before waiting: the loop below pumps messages, so this object can be destroyed while the
+    // paste waits inside it, and the frame that wakes up must not touch its members afterwards.
+    std::shared_ptr<bool> alive = alive_;
+
     // Ask the owner (on the GUI thread) to download the advertised files. It replies through
     // provideRenderedFileList -> onRenderedFileList, which quits the loop.
     requestRenderFileList(pending_file_list_);
 
     loop.exec();
+
+    if (!*alive)
+    {
+        // Destroyed while waiting - the clipboard is no longer ours to write to, and the members
+        // below are gone.
+        LOG(WARNING) << "Clipboard shut down while a paste was waiting; pasting nothing";
+        return;
+    }
+
     render_loop_ = nullptr;
+    rendering_ = false;
 
     if (rendered_paths_.isEmpty())
         LOG(INFO) << "No paths rendered; pasting nothing";

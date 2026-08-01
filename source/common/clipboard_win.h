@@ -21,6 +21,8 @@
 
 #include <qt_windows.h>
 
+#include <memory>
+
 #include <QHash>
 #include <QStringList>
 
@@ -111,6 +113,16 @@ private:
     // delivers the paths (or a timeout fires, so a paste can never hang indefinitely).
     QEventLoop* render_loop_ = nullptr;
     QStringList rendered_paths_;
+
+    // True between entering onRenderFileList and leaving it. A second paste arriving while the first
+    // is still waiting would otherwise nest another loop inside it and overwrite |render_loop_|, so
+    // only the innermost would ever be woken.
+    bool rendering_ = false;
+
+    // Cleared when this object is destroyed. The nested render loop pumps messages, so the clipboard
+    // thread can shut down and delete this object while a paste is still waiting inside it; the
+    // waiting frame checks its own copy afterwards instead of touching freed members.
+    std::shared_ptr<bool> alive_;
 
     Q_DISABLE_COPY(ClipboardWin)
 };
