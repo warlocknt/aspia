@@ -77,6 +77,10 @@ qint64 g_max_log_dir_size = kDefaultMaxLogDirSize;
 int g_log_file_number = -1;
 
 QString g_log_dir_path;
+
+// Set when a directory was requested but could not be used and the default was taken instead. Kept
+// so it can be reported once logging is running, since it cannot be logged while being set up.
+bool g_log_dir_fallback = false;
 QString g_log_file_path;
 QFile g_log_file;
 QMutex g_log_file_lock;
@@ -284,26 +288,46 @@ bool initLoggingUnlocked(const QString& prefix)
     // The next log file must have a number higher than the current one.
     ++g_log_file_number;
 
-    QString file_dir = g_log_dir_path;
-    if (file_dir.isEmpty())
-        file_dir = defaultLogFileDir();
+    const QString time = QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss.zzz");
 
-    if (file_dir.isEmpty())
-        return false;
+    // A configured directory is only a request. It is shared by processes running as different users
+    // - the service as SYSTEM, the client as the operator - so one of them may well be unable to
+    // create or write there. Falling back to the default keeps that process logging somewhere rather
+    // than silently logging nowhere, which is the worst possible outcome for a diagnostic facility.
+    QStringList candidates;
+    if (!g_log_dir_path.isEmpty())
+        candidates.append(g_log_dir_path);
+    candidates.append(defaultLogFileDir());
 
-    QDir dir(file_dir);
-    if (!dir.exists())
+    QString file_path;
+
+    for (const QString& file_dir : candidates)
     {
-        if (!dir.mkpath(file_dir))
-            return false;
+        if (file_dir.isEmpty())
+            continue;
+
+        QDir dir(file_dir);
+        if (!dir.exists() && !dir.mkpath(file_dir))
+            continue;
+
+        QString candidate_path =
+            QString("%1/%2-%3.%4.log").arg(file_dir, prefix, time).arg(g_log_file_number);
+
+        g_log_file.setFileName(candidate_path);
+        if (!g_log_file.open(QFile::WriteOnly | QFile::Append | QFile::Text))
+            continue;
+
+        file_path = std::move(candidate_path);
+        break;
     }
 
-    QString time = QDateTime::currentDateTime().toString("yyyyMMdd-hhmmss.zzz");
-    QString file_path = QString("%1/%2-%3.%4.log").arg(file_dir, prefix, time).arg(g_log_file_number);
-
-    g_log_file.setFileName(file_path);
-    if (!g_log_file.open(QFile::WriteOnly | QFile::Append | QFile::Text))
+    if (file_path.isEmpty())
         return false;
+
+    const QString file_dir = QFileInfo(file_path).absolutePath();
+
+    g_log_dir_fallback = !g_log_dir_path.isEmpty() &&
+        QFileInfo(file_dir) != QFileInfo(g_log_dir_path);
 
     // Runs on every rotation rather than once at startup, so that a process which logs heavily is
     // bounded while it runs and not only when it is restarted. That was expensive before, because
@@ -408,6 +432,19 @@ LoggingSettings::LoggingSettings()
         destination = LOG_TO_STDOUT;
     else
         destination = LOG_NONE;
+
+    // One directory for every Aspia process, whoever they run as. By default each lands in its own
+    // owner's temporary directory - the service as SYSTEM in the Windows one, the client in the
+    // operator's - so collecting a session means fetching from two places and knowing which is which.
+    // Pointing them all at one directory removes that. Must be a SYSTEM-wide variable to reach the
+    // service, and the directory must be writable by every account involved; a process that cannot
+    // use it falls back to its default rather than losing its log.
+    if (qEnvironmentVariableIsSet("ASPIA_LOG_DIR"))
+    {
+        const QString value = qEnvironmentVariable("ASPIA_LOG_DIR").trimmed();
+        if (!value.isEmpty())
+            log_dir = value;
+    }
 
     if (qEnvironmentVariableIsSet("ASPIA_MAX_LOG_FILE_SIZE"))
     {
@@ -518,6 +555,15 @@ bool initLogging(const LoggingSettings& settings)
     {
         // If log output is enabled, then we output information about the file.
         LOG(INFO) << "Logging file:" << g_log_file_path;
+
+        if (g_log_dir_fallback)
+        {
+            // Most likely this account cannot write there - the service and the operator do not run
+            // as the same user. Said plainly, because the alternative is wondering why half a
+            // session's logs are missing from the directory that was configured.
+            LOG(WARNING) << "Requested log directory" << g_log_dir_path
+                         << "could not be used; falling back to the default";
+        }
     }
 
     // Report the level that was actually requested, not the one forced for this block.
