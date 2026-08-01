@@ -72,9 +72,17 @@ private:
     bool onClipboardHtml();
     void onClipboardImage();
 
-    // Reads the CF_HDROP file list, turns it into a ClipboardFileList (top-level entries only; the
-    // download expands directories later) and hands it up through onFileList().
-    void onClipboardFiles();
+    // Reads the copied file list, turns it into a ClipboardFileList (top-level entries only; the
+    // download expands directories later) and hands it up through onFileList(). Returns false when
+    // the clipboard holds no files, so the caller can go on to record it as unsupported content.
+    bool onClipboardFiles();
+
+    // Reads the copied paths through the OLE data object rather than asking for CF_HDROP directly.
+    // Explorer usually offers files as an IDataObject and renders CF_HDROP only when asked, so
+    // IsClipboardFormatAvailable(CF_HDROP) says no for an ordinary file copy - which is exactly what
+    // a field run showed, the clipboard reporting nothing but "DataObject". Asking the object
+    // produces the paths in both cases.
+    bool readFileListFromDataObject(QStringList* paths);
 
     // Renders CF_HDROP on demand: Windows sends WM_RENDERFORMAT the moment another application
     // pastes the files we advertised, and WM_RENDERALLFORMATS when it takes the promise over as this
@@ -94,6 +102,11 @@ private:
     // The registered clipboard format id for "HTML Format". Resolved once; zero if it could not be
     // registered, in which case HTML is simply not offered.
     UINT html_format_ = 0;
+
+    // Whether OleInitialize succeeded on this thread. The thread already joins a single threaded
+    // apartment, but that is CoInitializeEx; the OLE clipboard needs the OLE layer on top of it.
+    // Without it the data object cannot be read and file copies are simply not offered.
+    bool ole_initialized_ = false;
 
     // How often each unsupported format name was seen this session, for the teardown summary.
     QHash<QString, int> unsupported_seen_;

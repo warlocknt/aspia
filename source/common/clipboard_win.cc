@@ -37,6 +37,7 @@
 #include <QStringList>
 
 #include <shellapi.h>
+#include <ole2.h>
 #include <shlobj.h>
 
 namespace common {
@@ -366,6 +367,12 @@ ClipboardWin::~ClipboardWin()
     if (render_loop_)
         render_loop_->quit();
 
+    if (ole_initialized_)
+    {
+        OleUninitialize();
+        ole_initialized_ = false;
+    }
+
     if (!window_)
     {
         LOG(ERROR) << "Window not created";
@@ -390,6 +397,19 @@ void ClipboardWin::init()
     html_format_ = RegisterClipboardFormatW(L"HTML Format");
     if (!html_format_)
         PLOG(ERROR) << "RegisterClipboardFormat(HTML Format) failed";
+
+    // The thread already joins a single threaded apartment, but that is CoInitializeEx and the OLE
+    // clipboard needs the OLE layer above it. Initializing it again over a compatible apartment is
+    // allowed and is what makes OleGetClipboard usable here. Balanced in the destructor.
+    const HRESULT hr = OleInitialize(nullptr);
+    if (SUCCEEDED(hr))
+    {
+        ole_initialized_ = true;
+    }
+    else
+    {
+        LOG(ERROR) << "OleInitialize failed: copied files will not be detected (hr=" << hr << ")";
+    }
 
     window_ = std::make_unique<base::MessageWindow>();
 
@@ -674,23 +694,23 @@ void ClipboardWin::onClipboardUpdate()
         return;
     }
 
-    // Files come last: an Explorer file copy is a clean CF_HDROP with no text or image alongside, so
-    // reaching here means nothing higher matched. Kept lowest so a rich copy that also carries a file
-    // reference is still handled as its text/image, unchanged from before.
-    if (IsClipboardFormatAvailable(CF_HDROP))
-    {
-        // Our own delayed-render promise, placed when a listing arrived from the peer, shows up here
-        // as a clipboard change. Reading it would ask us to render it (re-entrant) and send the
-        // peer's own files back to it. Swallow that one update.
-        if (own_file_list_pending_)
-        {
-            own_file_list_pending_ = false;
-            return;
-        }
+    // Files come last, so a rich copy that also references a file is still handled as its text or
+    // image, unchanged from before. Note this is not gated on IsClipboardFormatAvailable(CF_HDROP):
+    // Explorer normally publishes files as a data object and renders CF_HDROP only on demand, so that
+    // test reports no files for an ordinary copy. onClipboardFiles asks the object instead.
 
-        onClipboardFiles();
+    // Our own delayed-render promise, placed when a listing arrived from the peer, shows up here as a
+    // clipboard change. Reading it would ask us to render it - re-entering the paste path and sending
+    // the peer its own files back. Swallow that one update.
+    if (own_file_list_pending_)
+    {
+        own_file_list_pending_ = false;
         return;
     }
+
+    // Likewise while a paste of ours is being served: asking the clipboard now would recurse into it.
+    if (!rendering_ && onClipboardFiles())
+        return;
 
     recordUnsupported();
 }
@@ -966,62 +986,89 @@ void ClipboardWin::onClipboardImage()
 }
 
 //--------------------------------------------------------------------------------------------------
-void ClipboardWin::onClipboardFiles()
+bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
+{
+    if (!ole_initialized_)
+        return false;
+
+    IDataObject* data_object = nullptr;
+
+    // Works for both shapes of a file copy: a data object that renders on demand, and a plain
+    // CF_HDROP already sitting on the clipboard, which OLE wraps in an object of its own.
+    HRESULT hr = OleGetClipboard(&data_object);
+    if (FAILED(hr) || !data_object)
+        return false;
+
+    FORMATETC format;
+    memset(&format, 0, sizeof(format));
+    format.cfFormat = CF_HDROP;
+    format.dwAspect = DVASPECT_CONTENT;
+    format.lindex = -1;
+    format.tymed = TYMED_HGLOBAL;
+
+    // Asks whether the object can produce the format, which a delayed-rendering owner answers for
+    // content it has not built yet. Anything that is not a file copy says no here.
+    bool has_files = (data_object->QueryGetData(&format) == S_OK);
+
+    STGMEDIUM medium;
+    memset(&medium, 0, sizeof(medium));
+
+    if (has_files)
+    {
+        hr = data_object->GetData(&format, &medium);
+        if (FAILED(hr))
+        {
+            LOG(ERROR) << "Unable to get the file list from the clipboard data object (hr=" << hr << ")";
+            has_files = false;
+        }
+    }
+
+    if (has_files)
+    {
+        HDROP drop = reinterpret_cast<HDROP>(GlobalLock(medium.hGlobal));
+        if (drop)
+        {
+            const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
+            for (UINT i = 0; i < count; ++i)
+            {
+                const UINT length = DragQueryFileW(drop, i, nullptr, 0);
+                if (!length)
+                    continue;
+
+                std::wstring path(length, L'\0');
+
+                // DragQueryFile writes |length| chars plus the terminator, so the buffer must have
+                // room for both; it does not count the terminator in the value it returned.
+                if (DragQueryFileW(drop, i, path.data(), length + 1) == 0)
+                {
+                    PLOG(ERROR) << "DragQueryFileW failed";
+                    continue;
+                }
+
+                paths->append(QString::fromWCharArray(path.c_str(), static_cast<int>(length)));
+            }
+
+            GlobalUnlock(medium.hGlobal);
+        }
+        else
+        {
+            PLOG(ERROR) << "Couldn't lock the clipboard file list";
+        }
+
+        ReleaseStgMedium(&medium);
+    }
+
+    data_object->Release();
+    return !paths->isEmpty();
+}
+
+//--------------------------------------------------------------------------------------------------
+bool ClipboardWin::onClipboardFiles()
 {
     QStringList paths;
 
-    // Add a scope, so that we keep the clipboard open for as short a time as possible.
-    {
-        base::ScopedClipboard clipboard;
-
-        if (!clipboard.init(window_->hwnd()))
-        {
-            PLOG(ERROR) << "Couldn't open the clipboard";
-            return;
-        }
-
-        HGLOBAL files_global = clipboard.data(CF_HDROP);
-        if (!files_global)
-        {
-            PLOG(ERROR) << "Couldn't get files from the clipboard";
-            return;
-        }
-
-        base::ScopedHGLOBAL<char> files_lock(files_global);
-        if (!files_lock.get())
-        {
-            PLOG(ERROR) << "Couldn't lock clipboard files";
-            return;
-        }
-
-        HDROP drop = reinterpret_cast<HDROP>(files_lock.get());
-
-        const UINT count = DragQueryFileW(drop, 0xFFFFFFFF, nullptr, 0);
-        for (UINT i = 0; i < count; ++i)
-        {
-            const UINT length = DragQueryFileW(drop, i, nullptr, 0);
-            if (!length)
-                continue;
-
-            std::wstring path(length, L'\0');
-
-            // DragQueryFile writes |length| chars plus the terminator, so the buffer must have room
-            // for both; it does not count the terminator in the value it returned.
-            if (DragQueryFileW(drop, i, path.data(), length + 1) == 0)
-            {
-                PLOG(ERROR) << "DragQueryFileW failed";
-                continue;
-            }
-
-            paths.append(QString::fromWCharArray(path.c_str(), static_cast<int>(length)));
-        }
-    }
-
-    if (paths.isEmpty())
-    {
-        LOG(WARNING) << "Empty file list on the clipboard";
-        return;
-    }
+    if (!readFileListFromDataObject(&paths))
+        return false;
 
     // Explorer copies come from one directory, so its path is the root the names are relative to.
     // Only the top level is listed here; directories are walked later, during the actual download.
@@ -1065,6 +1112,7 @@ void ClipboardWin::onClipboardFiles()
               << dir_count << "folders," << total_bytes << "bytes of files)";
 
     onFileList(file_list);
+    return true;
 }
 
 //--------------------------------------------------------------------------------------------------
