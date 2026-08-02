@@ -22,6 +22,7 @@
 #include "base/win/message_window.h"
 #include "base/win/scoped_clipboard.h"
 #include "base/win/scoped_hglobal.h"
+#include "base/win/scoped_object.h"
 
 #include <limits>
 
@@ -48,6 +49,11 @@ namespace {
 // two is therefore a matter of adding or removing these 14 bytes, which is a good deal less work
 // than walking the bitmap layout by hand.
 const int kBitmapFileHeaderSize = 14;
+
+// How long to wait before looking at the clipboard a second time when it advertises an OLE object we
+// could not read. Long enough for an owner that is still publishing to finish, short enough that a
+// copy followed straight away by a paste on the other side still finds the listing waiting.
+const int kFileRecheckDelayMs = 200;
 
 //--------------------------------------------------------------------------------------------------
 // Offset from the start of a packed DIB to its pixels: the header, then the colour table if the
@@ -133,6 +139,35 @@ QString availableFormats()
 }
 
 //--------------------------------------------------------------------------------------------------
+// The process that owns the clipboard, by name. Answers who put the content there - and, when the
+// clipboard cannot be opened, who is holding it. Names only, nothing about the content.
+QString clipboardOwnerName()
+{
+    HWND owner = GetClipboardOwner();
+    if (!owner)
+        return QStringLiteral("<none>");
+
+    DWORD process_id = 0;
+    GetWindowThreadProcessId(owner, &process_id);
+    if (!process_id)
+        return QStringLiteral("<unknown>");
+
+    base::ScopedHandle process(
+        OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, process_id));
+    if (!process.isValid())
+        return QStringLiteral("pid %1 <no access>").arg(process_id);
+
+    wchar_t path[MAX_PATH] = { 0 };
+    DWORD length = static_cast<DWORD>(std::size(path));
+
+    if (!QueryFullProcessImageNameW(process, 0, path, &length))
+        return QStringLiteral("pid %1 <unnamed>").arg(process_id);
+
+    return QStringLiteral("%1 (pid %2)")
+        .arg(QFileInfo(QString::fromWCharArray(path)).fileName()).arg(process_id);
+}
+
+//--------------------------------------------------------------------------------------------------
 // The formats an OLE data object says it can supply, by name. This is what the clipboard's owner
 // really offers, as opposed to what has already been rendered onto the clipboard, so it separates
 // "the copy holds no files" from "the object refused to answer". Names only, never content.
@@ -146,9 +181,11 @@ QString dataObjectFormats(IDataObject* data_object)
     QStringList formats;
 
     FORMATETC entry;
-    ULONG fetched = 0;
 
-    while (enumerator->Next(1, &entry, &fetched) == S_OK && fetched == 1)
+    // pceltFetched is passed as null, which is allowed when asking for one item and avoids a real
+    // trap: some implementations leave it untouched for a single item, so requiring it to come back
+    // as 1 ended the loop immediately and reported no formats at all.
+    while (enumerator->Next(1, &entry, nullptr) == S_OK)
     {
         wchar_t name[128] = { 0 };
 
@@ -434,6 +471,12 @@ void ClipboardWin::init()
     html_format_ = RegisterClipboardFormatW(L"HTML Format");
     if (!html_format_)
         PLOG(ERROR) << "RegisterClipboardFormat(HTML Format) failed";
+
+    // The marker OLE leaves on the clipboard when the content is a data object. Its presence is what
+    // separates "an object is there and we failed to read it" from "nothing of interest here".
+    data_object_format_ = RegisterClipboardFormatW(L"DataObject");
+    if (!data_object_format_)
+        PLOG(ERROR) << "RegisterClipboardFormat(DataObject) failed";
 
     // The thread already joins a single threaded apartment, but that is CoInitializeEx and the OLE
     // clipboard needs the OLE layer above it. Initializing it again over a compatible apartment is
@@ -749,6 +792,18 @@ void ClipboardWin::onClipboardUpdate()
     if (!rendering_ && onClipboardFiles())
         return;
 
+    // An OLE object is advertised but nothing readable came out of it. That is what a clipboard read
+    // too early looks like - the owner has published the marker and is still filling in the rest -
+    // so give it a moment and look once more before writing the content off. Once per change, so a
+    // clipboard that genuinely holds something we cannot use is not re-examined forever.
+    if (data_object_format_ && !file_recheck_scheduled_ && !rendering_ &&
+        IsClipboardFormatAvailable(data_object_format_))
+    {
+        file_recheck_scheduled_ = true;
+        QTimer::singleShot(kFileRecheckDelayMs, this, &ClipboardWin::onFileRecheck);
+        return;
+    }
+
     recordUnsupported();
 }
 
@@ -1023,6 +1078,25 @@ void ClipboardWin::onClipboardImage()
 }
 
 //--------------------------------------------------------------------------------------------------
+void ClipboardWin::onFileRecheck()
+{
+    file_recheck_scheduled_ = false;
+
+    // The clipboard may have changed again, or a paste of ours may have started, in the meantime.
+    if (rendering_)
+        return;
+
+    if (onClipboardFiles())
+    {
+        LOG(INFO) << "Copied files were only readable on the second look";
+        return;
+    }
+
+    // Deferred from the first pass so the content is written off once, and only after this.
+    recordUnsupported();
+}
+
+//--------------------------------------------------------------------------------------------------
 bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
 {
     if (!ole_initialized_)
@@ -1032,12 +1106,35 @@ bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
 
     // Works for both shapes of a file copy: a data object that renders on demand, and a plain
     // CF_HDROP already sitting on the clipboard, which OLE wraps in an object of its own.
-    HRESULT hr = OleGetClipboard(&data_object);
-    if (FAILED(hr) || !data_object)
+    // Retried, because the clipboard is a single system-wide lock and the application that just
+    // copied usually still holds it when the change notification arrives. A field run failed here
+    // seven times out of seven with CLIPBRD_E_CANT_OPEN while the legacy path, a few lines later in
+    // the same handler, opened it without trouble - the difference being that ScopedClipboard retries
+    // and this one call did not. Same policy as ScopedClipboard uses.
+    static const int kMaxAttempts = 5;
+    static const int kSleepBetweenAttemptsMs = 5;
+
+    HRESULT hr = S_OK;
+
+    for (int attempt = 0; attempt < kMaxAttempts; ++attempt)
     {
-        // Reported, not swallowed: the object belongs to another process and, for the host agent,
-        // another account, so this is exactly where a cross-account refusal would surface.
-        LOG(ERROR) << "OleGetClipboard failed (hr=" << QString::number(hr, 16) << ")";
+        hr = OleGetClipboard(&data_object);
+        if (SUCCEEDED(hr) && data_object)
+        {
+            if (attempt > 0)
+                LOG(INFO) << "Clipboard data object obtained on attempt" << (attempt + 1);
+            break;
+        }
+
+        data_object = nullptr;
+        Sleep(kSleepBetweenAttemptsMs);
+    }
+
+    if (!data_object)
+    {
+        // Named rather than swallowed: whoever holds the clipboard is the answer to why this failed.
+        LOG(ERROR) << "OleGetClipboard failed after" << kMaxAttempts << "attempts (hr="
+                   << QString::number(hr, 16) << "). Clipboard owner:" << clipboardOwnerName();
         return false;
     }
 
@@ -1059,7 +1156,8 @@ bool ClipboardWin::readFileListFromDataObject(QStringList* paths)
         // it separates "the copy holds no files" from "the object would not talk to us". The formats
         // it does offer are listed by name, which is the difference between those two cases.
         LOG(INFO) << "Clipboard data object does not offer CF_HDROP (hr="
-                  << QString::number(hr, 16) << "). Offered:" << dataObjectFormats(data_object);
+                  << QString::number(hr, 16) << "). Owner:" << clipboardOwnerName()
+                  << "Offered:" << dataObjectFormats(data_object);
     }
 
     STGMEDIUM medium;

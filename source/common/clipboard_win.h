@@ -108,10 +108,22 @@ private:
     // registered, in which case HTML is simply not offered.
     UINT html_format_ = 0;
 
+    // Looks at the clipboard once more shortly after a file read came up empty, in case the owner
+    // was still publishing when the change notification arrived.
+    void onFileRecheck();
+
     // Whether OleInitialize succeeded on this thread. The thread already joins a single threaded
     // apartment, but that is CoInitializeEx; the OLE clipboard needs the OLE layer on top of it.
     // Without it the data object cannot be read and file copies are simply not offered.
     bool ole_initialized_ = false;
+
+    // The registered id of the "DataObject" format, the marker OLE leaves on the clipboard. Used to
+    // tell "an object is there but we could not read it yet" from "there is nothing of interest".
+    UINT data_object_format_ = 0;
+
+    // Set while a delayed second look is pending, so one clipboard change is re-examined once and
+    // not repeatedly.
+    bool file_recheck_scheduled_ = false;
 
     // How often each unsupported format name was seen this session, for the teardown summary.
     QHash<QString, int> unsupported_seen_;
